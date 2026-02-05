@@ -19,6 +19,8 @@ function useAutoSave({ sceneElementsRef, appStateRef, fileHandle }) {
   const prevElementsRef = useRef();
   const prevFileHandleRef = useRef();
 
+  const isSavingRef = useRef(false); // mutex to prevent overlapping saves
+
   useEffect(() => {
     // no file to save to
     if (!fileHandle) {
@@ -51,6 +53,11 @@ function useAutoSave({ sceneElementsRef, appStateRef, fileHandle }) {
         const content = serializeAsJSON(currentElements, appStateRef.current, {}, "local");
 
         const saveToFile = async () => {
+          if (isSavingRef.current) {
+            console.log("[useAutoSave] Save already in progress, skipping");
+            return;
+          }
+          isSavingRef.current = true;  // acquire lock
           try {
             const writable = await fileHandle.createWritable();
             await writable.write(content);
@@ -58,6 +65,8 @@ function useAutoSave({ sceneElementsRef, appStateRef, fileHandle }) {
             console.log("[useAutoSave] ✅ Auto-saved successfully to:", fileHandle.name);
           } catch (err) {
             console.error("[useAutoSave] ❌ Auto-save failed:", err);
+          } finally {
+            isSavingRef.current = false;  // release lock
           }
         };
 
