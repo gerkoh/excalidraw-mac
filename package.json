@@ -3,22 +3,31 @@
   "version": "1.0.0",
   "description": "Wrapper around excalidraw with extra features",
   "license": "MIT",
-  "author": "Gerald",
+  "author": "Gerald Koh",
   "type": "commonjs",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "dev": "vite dev",
-    "build": "vite build"
+    "build": "vite build",
+    "dmg": "electron-builder",
+    "compile": "npm run build && npm run dmg"
   },
   "dependencies": {
-    "@excalidraw/excalidraw": "^0.18.0",
+    "@excalidraw/excalidraw": "^0.17.6",
     "@vitejs/plugin-react": "^5.1.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "electron": "^40.1.0",
+    "electron-builder": "^26.7.0",
     "vite": "^7.3.1"
+  },
+  "build": {
+    "appId": "com.geraldkoh.excalidrawmac",
+    "mac": {
+      "target": "dmg"
+    }
   }
 }

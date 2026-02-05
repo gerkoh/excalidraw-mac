@@ -1,6 +1,6 @@
 # Excalidraw Mac
 
-A desktop application for [Excalidraw](https://excalidraw.com/).
+A desktop application for [Excalidraw](https://excalidraw.com/), which auto-saves your drawings to local files.
 
 ## References
 
