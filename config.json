@@ -1,3 +1,4 @@
 {
-  "autoSaveInterval": 2000
+  "autoSaveDebounceMs": 2000,
+  "autoSaveCheckIntervalMs": 500
 }
