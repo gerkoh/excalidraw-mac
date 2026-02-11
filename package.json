@@ -1,7 +1,7 @@
 {
   "name": "excalidraw-mac",
   "version": "1.0.0",
-  "description": "Wrapper around excalidraw with extra features",
+  "description": "Wrapper around excalidraw with local auto-save functionality",
   "license": "MIT",
   "author": "Gerald Koh",
   "type": "commonjs",
@@ -14,7 +14,7 @@
     "compile": "npm run build && npm run dmg"
   },
   "dependencies": {
-    "@excalidraw/excalidraw": "^0.17.6",
+    "@excalidraw/excalidraw": "^0.18.0",
     "@vitejs/plugin-react": "^5.1.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
