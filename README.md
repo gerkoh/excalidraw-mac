@@ -91,6 +91,12 @@ npm run compile   # lint → format → build → package DMG
 | `npm run lint`    | Run ESLint                                        |
 | `npm run format`  | Run Prettier                                      |
 
+## Known Limitations
+
+### Drag-and-drop + undo can lose images
+
+If you drag and drop images onto the canvas and then undo, the embedded image data will be lost. To be safe, keep a backup of your `.excalidraw` file before drag-and-drop operations involving images.
+
 ## Updating Excalidraw Fonts
 
 After upgrading the `@excalidraw/excalidraw` package, re-copy the font assets:
