@@ -1,6 +1,6 @@
 {
   "name": "excalidraw-mac",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Wrapper around excalidraw with local auto-save functionality",
   "license": "MIT",
   "author": "Gerald Koh",
@@ -11,25 +11,53 @@
     "dev": "vite dev",
     "build": "vite build",
     "dmg": "electron-builder",
-    "compile": "npm run build && npm run dmg"
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "compile": "npm run lint && npm run format && npm run build && npm run dmg"
   },
   "dependencies": {
     "@excalidraw/excalidraw": "^0.18.0",
-    "@vitejs/plugin-react": "^5.1.3",
+    "electron-store": "^8.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@vitejs/plugin-react": "^5.1.3",
     "electron": "^40.1.0",
     "electron-builder": "^26.7.0",
+    "eslint": "^9.39.2",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "prettier": "^3.8.1",
     "vite": "^7.3.1"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "build": {
     "appId": "com.geraldkoh.excalidrawmac",
     "icon": "excalidraw-app/icon.png",
     "mac": {
       "target": "dmg",
-      "icon": "excalidraw-app/icon.png"
+      "icon": "excalidraw-app/icon.png",
+      "extendInfo": {
+        "UTExportedTypeDeclarations": [
+          {
+            "UTTypeIdentifier": "com.geraldkoh.excalidraw",
+            "UTTypeDescription": "Excalidraw Drawing",
+            "UTTypeConformsTo": [
+              "public.json",
+              "public.data"
+            ],
+            "UTTypeTagSpecification": {
+              "public.filename-extension": [
+                "excalidraw"
+              ]
+            }
+          }
+        ]
+      }
     }
   }
 }

@@ -1,4 +1,7 @@
 {
+  "windowWidth": 1512,
+  "windowHeight": 982,
   "autoSaveDebounceMs": 2000,
-  "autoSaveCheckIntervalMs": 500
+  "autoSaveCheckIntervalMs": 500,
+  "defaultOpenDir": "/Users/geraldkoh/Desktop/excalidraw-assets"
 }

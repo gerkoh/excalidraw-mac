@@ -1,11 +1,7 @@
 import { useRef, useEffect } from "react";
 import { serializeAsJSON } from "@excalidraw/excalidraw";
-import config from "@config";
 
-const AUTOSAVE_DEBOUNCE_MS = config.autoSaveDebounceMs;
-const AUTOSAVE_CHECK_INTERVAL_MS = config.autoSaveCheckIntervalMs;
-
-const elementsChanged = (prev, next) => {
+const isElementsChanged = (prev, next) => {
   if (!Array.isArray(prev) || !Array.isArray(next)) return true;
   if (prev.length !== next.length) return true;
   for (let i = 0; i < prev.length; i++) {
@@ -16,38 +12,36 @@ const elementsChanged = (prev, next) => {
   return false;
 };
 
-function useAutoSave({ sceneElementsRef, appStateRef, fileHandle }) {
+function useAutoSave({ sceneElementsRef, appStateRef, currentFilePath, config, excalidrawAPI }) {
   const prevElementsRef = useRef();
-  const prevFileHandleRef = useRef();
-
   const debounceTimerRef = useRef(null);
   const isSavingRef = useRef(false); // mutex to prevent overlapping saves
 
   useEffect(() => {
-    // no file to save to
-    if (!fileHandle) {
-      console.log("[useAutoSave] No fileHandle, auto-save disabled");
+    if (!config) {
+      console.log("[useAutoSave] Config missing, auto-save disabled");
+      return;
+    }
+    if (!currentFilePath) {
+      console.log("[useAutoSave] No file open, auto-save disabled");
+      return;
+    }
+    if (!excalidrawAPI) {
+      console.log("[useAutoSave] Excalidraw API not ready, auto-save disabled");
       return;
     }
 
-    console.log("[useAutoSave] Start auto-saving for:", fileHandle.name);
+    const AUTOSAVE_DEBOUNCE_MS = config.autoSaveDebounceMs;
+    const AUTOSAVE_CHECK_INTERVAL_MS = config.autoSaveCheckIntervalMs;
 
-    // load elements when file changes
-    if (fileHandle !== prevFileHandleRef.current) {
-      console.log("[useAutoSave] File changed!", {
-        from: prevFileHandleRef.current?.name || "(none)",
-        to: fileHandle.name,
-      });
-      prevElementsRef.current = sceneElementsRef.current;
-      prevFileHandleRef.current = fileHandle;
-    }
+    console.log("[useAutoSave] Start auto-saving to:", currentFilePath);
 
     // debounce auto-saves after an interval from last change
     const intervalCheck = setInterval(() => {
       const currentElements = sceneElementsRef.current;
       const prev = prevElementsRef.current;
 
-      const changed = elementsChanged(prev, currentElements);
+      const changed = isElementsChanged(prev, currentElements);
 
       if (changed) {
         prevElementsRef.current = currentElements; // set prev to current to prevent re-trigger
@@ -59,10 +53,11 @@ function useAutoSave({ sceneElementsRef, appStateRef, fileHandle }) {
 
         // after interval from last change, perform save
         debounceTimerRef.current = setTimeout(() => {
-          console.log("[useAutoSave] Changes settled, saving to:", fileHandle.name);
+          console.log("[useAutoSave] Changes settled, saving to:", currentFilePath);
 
           const latestElements = sceneElementsRef.current;
-          const content = serializeAsJSON(latestElements, appStateRef.current, {}, "local");
+          const files = excalidrawAPI.getFiles();
+          const content = serializeAsJSON(latestElements, appStateRef.current, files, "local");
 
           const saveToFile = async () => {
             if (isSavingRef.current) {
@@ -71,10 +66,12 @@ function useAutoSave({ sceneElementsRef, appStateRef, fileHandle }) {
             }
             isSavingRef.current = true; // acquire lock
             try {
-              const writable = await fileHandle.createWritable();
-              await writable.write(content);
-              await writable.close();
-              console.log("[useAutoSave] ✅ Auto-saved successfully to:", fileHandle.name);
+              const success = await window.electronAPI.writeFile(currentFilePath, content);
+              if (success) {
+                console.log("[useAutoSave] ✅ Auto-saved successfully to:", currentFilePath);
+              } else {
+                console.error("[useAutoSave] ❌ Auto-save returned failure");
+              }
             } catch (err) {
               console.error("[useAutoSave] ❌ Auto-save failed:", err);
             } finally {
@@ -87,7 +84,7 @@ function useAutoSave({ sceneElementsRef, appStateRef, fileHandle }) {
       }
     }, AUTOSAVE_CHECK_INTERVAL_MS); // how often to check for changes
 
-    // clear interval on file change or unmount
+    // clear interval on path change or unmount
     return () => {
       console.log("[useAutoSave] Clearing auto-save interval");
       clearInterval(intervalCheck);
@@ -95,7 +92,8 @@ function useAutoSave({ sceneElementsRef, appStateRef, fileHandle }) {
         clearTimeout(debounceTimerRef.current);
       }
     };
-  }, [fileHandle, sceneElementsRef, appStateRef]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentFilePath, config, excalidrawAPI]);
 }
 
 export default useAutoSave;
