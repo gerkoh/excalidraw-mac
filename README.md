@@ -41,6 +41,13 @@ sequenceDiagram
     Main->>FS: read .excalidraw file
     Main-->>App: file content
 
+    Note over App: ⌘N (New)
+    Main->>App: menu-new event
+    App->>App: resetScene(), clear file path
+    App->>Preload: saveLastPath(null)
+    Preload->>Main: invoke "save-last-path"
+    Main->>Store: set lastOpenedPath = null
+
     Note over App: ⌘O / ⌘S / ⇧⌘S
     Main->>App: menu event
     App->>Preload: openFileDialog() / saveFileDialog()

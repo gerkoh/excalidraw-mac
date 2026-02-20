@@ -69,6 +69,15 @@ export default function App() {
   useEffect(() => {
     if (!excalidrawAPI) return;
 
+    const handleNew = async () => {
+      console.log("[App] New canvas");
+      setCurrentFilePath(null);
+      await window.electronAPI.saveLastPath(null);
+      sceneElementsRef.current = null;
+      appStateRef.current = null;
+      excalidrawAPI.resetScene();
+    };
+
     const handleOpen = async () => {
       const result = await window.electronAPI.openFileDialog();
       if (!result) return;
@@ -148,6 +157,7 @@ export default function App() {
       }
     };
 
+    window.electronAPI.onMenuNew(handleNew);
     window.electronAPI.onMenuOpen(handleOpen);
     window.electronAPI.onMenuSave(handleSave);
     window.electronAPI.onMenuSaveAs(handleSaveAs);
@@ -155,6 +165,7 @@ export default function App() {
 
     // cleanup: remove listeners when deps change or on unmount
     return () => {
+      window.electronAPI.offMenuNew(handleNew);
       window.electronAPI.offMenuOpen(handleOpen);
       window.electronAPI.offMenuSave(handleSave);
       window.electronAPI.offMenuSaveAs(handleSaveAs);

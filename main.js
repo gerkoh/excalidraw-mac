@@ -155,6 +155,15 @@ const buildMenu = () => {
       label: "File",
       submenu: [
         {
+          label: "New",
+          accelerator: "Cmd+N",
+          click: () => {
+            const win = BrowserWindow.getFocusedWindow();
+            if (win) win.webContents.send("menu-new");
+          },
+        },
+        { type: "separator" },
+        {
           label: "Open…",
           accelerator: "Cmd+O",
           click: () => {

@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   saveFileDialog: (content) => ipcRenderer.invoke("save-file-dialog", content),
 
   // Menu event listeners (main process → renderer)
+  onMenuNew: (callback) => ipcRenderer.on("menu-new", callback),
   onMenuOpen: (callback) => ipcRenderer.on("menu-open", callback),
   onMenuSave: (callback) => ipcRenderer.on("menu-save", callback),
   onMenuSaveAs: (callback) => ipcRenderer.on("menu-save-as", callback),
@@ -29,6 +30,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   offOpenFile: (callback) => ipcRenderer.removeListener("open-file", callback),
 
   // Cleanup listeners
+  offMenuNew: (callback) => ipcRenderer.removeListener("menu-new", callback),
   offMenuOpen: (callback) => ipcRenderer.removeListener("menu-open", callback),
   offMenuSave: (callback) => ipcRenderer.removeListener("menu-save", callback),
   offMenuSaveAs: (callback) => ipcRenderer.removeListener("menu-save-as", callback),
