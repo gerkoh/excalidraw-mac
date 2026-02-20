@@ -42,6 +42,19 @@
       "target": "dmg",
       "icon": "excalidraw-app/icon.png",
       "extendInfo": {
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Excalidraw Drawing",
+            "CFBundleTypeExtensions": [
+              "excalidraw"
+            ],
+            "CFBundleTypeRole": "Editor",
+            "LSHandlerRank": "Owner",
+            "LSItemContentTypes": [
+              "com.geraldkoh.excalidraw"
+            ]
+          }
+        ],
         "UTExportedTypeDeclarations": [
           {
             "UTTypeIdentifier": "com.geraldkoh.excalidraw",

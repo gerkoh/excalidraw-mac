@@ -70,6 +70,13 @@ const registerIpcHandlers = () => {
     return store.get("lastOpenedPath") ?? null;
   });
 
+  // Returns and clears the pending file path from OS open-file event
+  ipcMain.handle("get-pending-file", () => {
+    const p = pendingFilePath;
+    pendingFilePath = null;
+    return p;
+  });
+
   ipcMain.handle("open-file-dialog", async () => {
     const win = BrowserWindow.getFocusedWindow();
     const config = readConfig();
@@ -205,6 +212,27 @@ const buildMenu = () => {
 };
 
 // --- App Lifecycle ---
+
+// Track file path requested via OS open-file (e.g. double-click / Open With)
+let pendingFilePath = null;
+
+app.on("open-file", (event, filePath) => {
+  event.preventDefault();
+  if (!isAllowedPath(filePath)) return;
+
+  const win = BrowserWindow.getAllWindows()[0];
+  if (win) {
+    // App is already running – send to renderer
+    win.webContents.send("open-file", filePath);
+  } else if (app.isReady()) {
+    // App is running but all windows are closed (e.g. Cmd+W) – reopen
+    pendingFilePath = filePath;
+    createWindow();
+  } else {
+    // App is still launching – store for later
+    pendingFilePath = filePath;
+  }
+});
 
 app.whenReady().then(() => {
   // saves to ~/Library/Application Support/excalidraw-mac/excalidraw-mac.json

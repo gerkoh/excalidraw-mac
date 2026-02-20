@@ -12,6 +12,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   saveLastPath: (filePath) => ipcRenderer.invoke("save-last-path", filePath),
   getLastPath: () => ipcRenderer.invoke("get-last-path"),
 
+  // Pending file from OS open-file event (double-click / Open With at launch)
+  getPendingFile: () => ipcRenderer.invoke("get-pending-file"),
+
   // File dialogs
   openFileDialog: () => ipcRenderer.invoke("open-file-dialog"),
   saveFileDialog: (content) => ipcRenderer.invoke("save-file-dialog", content),
@@ -20,6 +23,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   onMenuOpen: (callback) => ipcRenderer.on("menu-open", callback),
   onMenuSave: (callback) => ipcRenderer.on("menu-save", callback),
   onMenuSaveAs: (callback) => ipcRenderer.on("menu-save-as", callback),
+
+  // OS open-file event (double-click / Open With)
+  onOpenFile: (callback) => ipcRenderer.on("open-file", callback),
+  offOpenFile: (callback) => ipcRenderer.removeListener("open-file", callback),
 
   // Cleanup listeners
   offMenuOpen: (callback) => ipcRenderer.removeListener("menu-open", callback),

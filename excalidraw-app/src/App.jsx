@@ -30,24 +30,32 @@ export default function App() {
         setConfig(cfg);
         console.log("[App] Config loaded:", cfg);
 
-        // try to reopen the last used file
-        const lastPath = await window.electronAPI.getLastPath();
-        if (lastPath) {
-          const content = await window.electronAPI.readFile(lastPath);
+        // Check if a file was requested via OS (double-click / Open With)
+        const pendingPath = await window.electronAPI.getPendingFile();
+        // Use the pending file if available, otherwise fall back to last opened
+        const targetPath = pendingPath || (await window.electronAPI.getLastPath());
+
+        if (targetPath) {
+          const content = await window.electronAPI.readFile(targetPath);
           if (content) {
             const parsed = JSON.parse(content);
-            console.log("[App] Loaded last file:", lastPath);
-            setCurrentFilePath(lastPath);
+            console.log("[App] Loaded file:", targetPath);
+            setCurrentFilePath(targetPath);
+            await window.electronAPI.saveLastPath(targetPath);
+            const appState = { ...(parsed.appState || {}) };
+            delete appState.scrollX;
+            delete appState.scrollY;
             setInitialData({
               elements: parsed.elements || [],
-              appState: parsed.appState || {},
+              appState,
               files: parsed.files || {},
+              scrollToContent: true,
             });
             return;
           }
         }
 
-        console.log("[App] No last opened file found, starting fresh");
+        console.log("[App] No file to open, starting fresh");
         setInitialData(null);
       } catch (err) {
         console.error("[App] Failed to load startup file:", err);
@@ -76,7 +84,9 @@ export default function App() {
       if (parsed.files && Object.keys(parsed.files).length > 0) {
         excalidrawAPI.addFiles(Object.entries(parsed.files).map(([id, file]) => ({ ...file, id })));
       }
-      excalidrawAPI.scrollToContent();
+      window.requestAnimationFrame(() =>
+        window.requestAnimationFrame(() => excalidrawAPI.scrollToContent()),
+      );
     };
 
     const handleSaveAs = async () => {
@@ -112,15 +122,43 @@ export default function App() {
       }
     };
 
+    // OS-level open-file (double-click / Open With)
+    const handleOpenFile = async (_event, filePath) => {
+      try {
+        const content = await window.electronAPI.readFile(filePath);
+        if (!content) return;
+        const parsed = JSON.parse(content);
+        console.log("[App] Opened file via OS:", filePath);
+        setCurrentFilePath(filePath);
+        await window.electronAPI.saveLastPath(filePath);
+        excalidrawAPI.updateScene({
+          elements: parsed.elements || [],
+          appState: parsed.appState || {},
+        });
+        if (parsed.files && Object.keys(parsed.files).length > 0) {
+          excalidrawAPI.addFiles(
+            Object.entries(parsed.files).map(([id, file]) => ({ ...file, id })),
+          );
+        }
+        window.requestAnimationFrame(() =>
+          window.requestAnimationFrame(() => excalidrawAPI.scrollToContent()),
+        );
+      } catch (err) {
+        console.error("[App] Failed to open file via OS:", err);
+      }
+    };
+
     window.electronAPI.onMenuOpen(handleOpen);
     window.electronAPI.onMenuSave(handleSave);
     window.electronAPI.onMenuSaveAs(handleSaveAs);
+    window.electronAPI.onOpenFile(handleOpenFile);
 
     // cleanup: remove listeners when deps change or on unmount
     return () => {
       window.electronAPI.offMenuOpen(handleOpen);
       window.electronAPI.offMenuSave(handleSave);
       window.electronAPI.offMenuSaveAs(handleSaveAs);
+      window.electronAPI.offOpenFile(handleOpenFile);
     };
   }, [excalidrawAPI]);
 
@@ -141,7 +179,7 @@ export default function App() {
 
       // prevent excalidraw's built-in drop handler from processing this file
       e.preventDefault();
-      e.stopPropagation();
+      e.stopImmediatePropagation();
 
       try {
         const content = await window.electronAPI.readFile(filePath);
@@ -150,14 +188,17 @@ export default function App() {
         const parsed = JSON.parse(content);
         console.log("[App] Opened dropped file:", filePath);
         setCurrentFilePath(filePath);
+        const dropAppState = { ...(parsed.appState || {}) };
+        delete dropAppState.scrollX;
+        delete dropAppState.scrollY;
         excalidrawAPI.updateScene({
           elements: parsed.elements || [],
-          appState: parsed.appState || {},
+          appState: dropAppState,
         });
         if (parsed.files && Object.keys(parsed.files).length > 0) {
           excalidrawAPI.addFiles(Object.entries(parsed.files).map(([id, f]) => ({ ...f, id })));
         }
-        excalidrawAPI.scrollToContent();
+        setTimeout(() => excalidrawAPI.scrollToContent(), 100);
       } catch (err) {
         console.error("[App] Failed to open dropped file:", err);
       }
