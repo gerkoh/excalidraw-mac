@@ -182,7 +182,10 @@ export default function App() {
       if (!files || files.length === 0) return;
 
       const file = files[0];
-      if (!file.name.endsWith(".excalidraw")) return;
+      if (!file.name.endsWith(".excalidraw")) {
+        console.warn("[App] Dropped file is not an .excalidraw file, ignoring:", file.name);
+        return;
+      }
 
       // Electron exposes the full filesystem path on dropped files
       const filePath = file.path;
@@ -197,7 +200,7 @@ export default function App() {
         if (!content) return;
 
         const parsed = JSON.parse(content);
-        console.log("[App] Opened dropped file:", filePath);
+        console.log("[App] Dropped file (overwriting current scene):", filePath);
         setCurrentFilePath(filePath);
         const dropAppState = { ...(parsed.appState || {}) };
         delete dropAppState.scrollX;
@@ -211,7 +214,7 @@ export default function App() {
         }
         setTimeout(() => excalidrawAPI.scrollToContent(), 100);
       } catch (err) {
-        console.error("[App] Failed to open dropped file:", err);
+        console.error("[App] Failed to load dropped file:", err);
       }
     };
 
