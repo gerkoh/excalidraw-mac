@@ -4,10 +4,8 @@
     <meta charset="utf-8" />
     <title>Excalidraw Tool</title>
     <script>
-      // Excalidraw uses new URL(fontPath, EXCALIDRAW_ASSET_PATH) to load fonts.
-      // In Electron's file:// protocol, we need an absolute base URL.
-      // Must be set before Excalidraw's module loads.
-      var base = location.href.substring(0, location.href.lastIndexOf("/") + 1);
+      // load fonts
+      const base = new URL(".", window.location.href).href;
       window.EXCALIDRAW_ASSET_PATH = base;
     </script>
   </head>
