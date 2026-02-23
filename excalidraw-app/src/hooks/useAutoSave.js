@@ -1,5 +1,5 @@
 import { useRef, useEffect } from "react";
-import { serializeAsJSON } from "@excalidraw/excalidraw";
+import { serializeScene } from "../utils/sceneUtils";
 
 const isElementsChanged = (prev, next) => {
   if (!Array.isArray(prev) || !Array.isArray(next)) return true;
@@ -12,7 +12,7 @@ const isElementsChanged = (prev, next) => {
   return false;
 };
 
-function useAutoSave({ sceneElementsRef, appStateRef, currentFilePath, config, excalidrawAPI }) {
+const useAutoSave = ({ sceneElementsRef, appStateRef, currentFilePath, config, excalidrawAPI }) => {
   const prevElementsRef = useRef();
   const debounceTimerRef = useRef(null);
   const isSavingRef = useRef(false); // mutex to prevent overlapping saves
@@ -55,9 +55,7 @@ function useAutoSave({ sceneElementsRef, appStateRef, currentFilePath, config, e
         debounceTimerRef.current = setTimeout(() => {
           console.log("[useAutoSave] Changes settled, saving to:", currentFilePath);
 
-          const latestElements = sceneElementsRef.current;
-          const files = excalidrawAPI.getFiles();
-          const content = serializeAsJSON(latestElements, appStateRef.current, files, "local");
+          const content = serializeScene(sceneElementsRef, appStateRef, excalidrawAPI);
 
           const saveToFile = async () => {
             if (isSavingRef.current) {
@@ -94,6 +92,6 @@ function useAutoSave({ sceneElementsRef, appStateRef, currentFilePath, config, e
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentFilePath, config, excalidrawAPI]);
-}
+};
 
 export default useAutoSave;

@@ -38,6 +38,9 @@
   "build": {
     "appId": "com.geraldkoh.excalidrawmac",
     "icon": "excalidraw-app/icon.png",
+    "extraResources": [
+      "config.json"
+    ],
     "mac": {
       "target": "dmg",
       "icon": "excalidraw-app/icon.png",

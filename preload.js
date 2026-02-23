@@ -9,7 +9,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   writeFile: (filePath, content) => ipcRenderer.invoke("write-file", filePath, content),
 
   // Last opened path persistence
-  saveLastPath: (filePath) => ipcRenderer.invoke("save-last-path", filePath),
   getLastPath: () => ipcRenderer.invoke("get-last-path"),
 
   // Pending file from OS open-file event (double-click / Open With at launch)

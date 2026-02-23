@@ -6,8 +6,11 @@ const Store = require("electron-store");
 // stores last opened file path (initialized after app is initialized)
 let store;
 
-// config file path
-const configPath = path.join(__dirname, "config.json");
+// config file path — in dev, config.json is in project root (__dirname);
+// in production, electron-builder copies it to Contents/Resources/
+const configPath = app.isPackaged
+  ? path.join(process.resourcesPath, "config.json")
+  : path.join(__dirname, "config.json");
 
 // read config from file
 const readConfig = () => {
@@ -59,12 +62,6 @@ const registerIpcHandlers = () => {
     }
   });
 
-  // Use electron-store to store last opened file path
-  ipcMain.handle("save-last-path", (_event, filePath) => {
-    store.set("lastOpenedPath", filePath);
-    return true;
-  });
-
   // Get last opened file path
   ipcMain.handle("get-last-path", () => {
     return store.get("lastOpenedPath") ?? null;
@@ -74,6 +71,9 @@ const registerIpcHandlers = () => {
   ipcMain.handle("get-pending-file", () => {
     const p = pendingFilePath;
     pendingFilePath = null;
+    if (p && fs.existsSync(p)) {
+      store.set("lastOpenedPath", p);
+    }
     return p;
   });
 
@@ -158,6 +158,8 @@ const buildMenu = () => {
           label: "New",
           accelerator: "Cmd+N",
           click: () => {
+            // auto clear last opened path on triggering new file with electron-store
+            store.set("lastOpenedPath", null);
             const win = BrowserWindow.getFocusedWindow();
             if (win) win.webContents.send("menu-new");
           },
@@ -228,6 +230,14 @@ let pendingFilePath = null;
 app.on("open-file", (event, filePath) => {
   event.preventDefault();
   if (!isAllowedPath(filePath)) return;
+
+  // Store may not be ready if this fires before app.whenReady() completes
+  if (!store) {
+    console.warn("[main] Store not ready, queuing pending file:", filePath);
+    pendingFilePath = filePath;
+    return;
+  }
+  store.set("lastOpenedPath", filePath);
 
   const win = BrowserWindow.getAllWindows()[0];
   if (win) {
