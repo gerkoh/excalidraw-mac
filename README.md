@@ -6,7 +6,7 @@ A desktop application for [Excalidraw](https://excalidraw.com/), which auto-save
 
 ```mermaid
 sequenceDiagram
-    participant App as App.jsx (Renderer)
+    participant App as Renderer (excalidraw-app)
     participant Preload as preload.js (Bridge)
     participant Main as main.js (Main Process)
     participant FS as Filesystem
@@ -14,7 +14,7 @@ sequenceDiagram
 
     Note over Main: app.whenReady()
 
-    Note over App: Startup
+    Note over App: Startup (index.html)
     App->>Preload: getConfig()
     Preload->>Main: invoke "get-config"
     Main->>FS: read config.json
@@ -35,23 +35,17 @@ sequenceDiagram
     Preload->>Main: invoke "write-file"
     Main->>FS: write .excalidraw file
 
-    Note over App: User drops .excalidraw file
-    App->>Preload: readFile(path)
-    Preload->>Main: invoke "read-file"
-    Main->>FS: read .excalidraw file
-    Main-->>App: file content
-
     Note over App: ⌘N (New)
     Main->>App: menu-new event
-    App->>App: resetScene(), clear file path
-    App->>Preload: saveLastPath(null)
-    Preload->>Main: invoke "save-last-path"
+    App->>App: resetScene(), clear state
     Main->>Store: set lastOpenedPath = null
 
     Note over App: ⌘O / ⌘S / ⇧⌘S
     Main->>App: menu event
     App->>Preload: openFileDialog() / saveFileDialog()
     Preload->>Main: IPC
+    Main->>Store: set lastOpenedPath = selected path
+
 ```
 
 ## Design Considerations
@@ -79,6 +73,16 @@ npm install
 npm run compile   # lint → format → build → package DMG
 ```
 
+### Configuration (`config.json`)
+
+| Option                    | Type   | Default | Description                                       |
+| ------------------------- | ------ | ------- | ------------------------------------------------- |
+| `windowWidth`             | number | 1512    | Window width in pixels                            |
+| `windowHeight`            | number | 982     | Window height in pixels                           |
+| `autoSaveDebounceMs`      | number | 2000    | Debounce delay in milliseconds before auto-saving |
+| `autoSaveCheckIntervalMs` | number | 500     | Interval in milliseconds to check for changes     |
+| `defaultOpenDir`          | string | (none)  | Default directory for file open/save dialogs      |
+
 ### Scripts
 
 | Command           | Description                                       |
@@ -91,11 +95,31 @@ npm run compile   # lint → format → build → package DMG
 | `npm run lint`    | Run ESLint                                        |
 | `npm run format`  | Run Prettier                                      |
 
+### Menu Shortcuts
+
+| Shortcut | Action      |
+| -------- | ----------- |
+| ⌘N       | New drawing |
+| ⌘O       | Open file   |
+| ⌘S       | Save        |
+| ⌘⇧S      | Save As     |
+
+The app also supports **file association** — double-clicking a `.excalidraw` file or using "Open With" will launch the app and load that file.
+
 ## Known Limitations
 
 ### Drag-and-drop + undo can lose images
 
 If you drag and drop images onto the canvas and then undo, the embedded image data will be lost. To be safe, keep a backup of your `.excalidraw` file before drag-and-drop operations involving images.
+
+## Auto-Save
+
+The app automatically saves your drawing to the last opened file. Changes are debounced (default 2 seconds) to avoid excessive disk writes. The auto-save behavior can be configured via `config.json`:
+
+- `autoSaveDebounceMs` — delay before saving after changes (default: 2000ms)
+- `autoSaveCheckIntervalMs` — how often to check for changes (default: 500ms)
+
+If no file is open, the app will prompt you to save when you make changes.
 
 ## Updating Excalidraw Fonts
 
@@ -110,3 +134,6 @@ cp -r node_modules/@excalidraw/excalidraw/dist/prod/fonts excalidraw-app/public/
 
 - [Excalidraw GitHub Repository](https://github.com/excalidraw/excalidraw)
 - [Excalidraw Documentation](https://docs.excalidraw.com/)
+- [Electron Documentation](https://www.electronjs.org/)
+- [electron-builder](https://www.electron.build/)
+- [electron-store](https://github.com/sindresorhus/electron-store)
