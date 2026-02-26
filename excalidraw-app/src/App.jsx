@@ -4,6 +4,7 @@ import "@excalidraw/excalidraw/index.css";
 import { useState, useRef, useCallback, useEffect } from "react";
 import useAutoSave from "./hooks/useAutoSave";
 import useFileOperations from "./hooks/useFileOperations";
+import { serializeScene } from "./utils/sceneUtils";
 
 export default function App() {
   // on startup, we load config and check if there's a file to open (pending from OS or last opened)
@@ -25,16 +26,22 @@ export default function App() {
   const sceneElementsRef = useRef(null);
   const appStateRef = useRef(null);
 
+  const getSerializedScene = useCallback(
+    () => serializeScene(sceneElementsRef, appStateRef, excalidrawAPI),
+    [excalidrawAPI],
+  );
+
   // handle menu events (New, Open, Save, Save As)
   // handle file open from finder
   const { currentFilePath, initialData } = useFileOperations({
     excalidrawAPI,
     sceneElementsRef,
     appStateRef,
+    getSerializedScene,
   });
 
   // auto-save writes to the current file path (inactive until a file is opened/saved)
-  useAutoSave({ sceneElementsRef, appStateRef, currentFilePath, config, excalidrawAPI });
+  useAutoSave({ sceneElementsRef, currentFilePath, config, excalidrawAPI, getSerializedScene });
 
   // Excalidraw fires onChange on every interaction
   // capture latest scene elements and app state for save operations

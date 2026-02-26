@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
-import { parseInitialData, loadScene, serializeScene } from "../utils/sceneUtils";
+import { parseInitialData, loadScene } from "../utils/sceneUtils";
 
-const useFileOperations = ({ excalidrawAPI, sceneElementsRef, appStateRef }) => {
+const useFileOperations = ({ excalidrawAPI, sceneElementsRef, appStateRef, getSerializedScene }) => {
   // current file path is stored in this hook and passed to App.jsx -> useAutoSave
   const [currentFilePath, setCurrentFilePath] = useState(null);
   const currentFilePathRef = useRef(currentFilePath);
@@ -26,9 +26,14 @@ const useFileOperations = ({ excalidrawAPI, sceneElementsRef, appStateRef }) => 
         if (targetPath) {
           const content = await window.electronAPI.readFile(targetPath);
           if (content) {
-            setCurrentFilePath(targetPath);
-            const initialData = parseInitialData(content);
-            setInitialData(initialData);
+            const data = parseInitialData(content);
+            if (data) {
+              setCurrentFilePath(targetPath);
+              setInitialData(data);
+            } else {
+              console.error("[useFileOperations] Failed to parse file on startup:", targetPath);
+              setInitialData(null);
+            }
           } else {
             console.error("[useFileOperations] Failed to read file on startup:", targetPath);
             setInitialData(null); // render empty canvas if file read fails
@@ -64,17 +69,18 @@ const useFileOperations = ({ excalidrawAPI, sceneElementsRef, appStateRef }) => 
       const result = await window.electronAPI.openFileDialog();
       if (!result) return; // user cancelled
 
-      const initialData = parseInitialData(result.content);
+      const data = parseInitialData(result.content);
+      if (!data) return;
       console.log("[useFileOperations] Opened file and loaded data:", result.path);
 
-      loadScene(excalidrawAPI, initialData);
+      loadScene(excalidrawAPI, data);
       setCurrentFilePath(result.path);
     };
 
     // ⇧⌘S - save as
     const handleSaveAs = async () => {
       console.log("[useFileOperations] ⇧⌘S Save As operation triggered");
-      const content = serializeScene(sceneElementsRef, appStateRef, excalidrawAPI);
+      const content = getSerializedScene();
       const newPath = await window.electronAPI.saveFileDialog(content);
       if (newPath) {
         console.log("[useFileOperations] Saved in new file:", newPath);
@@ -90,7 +96,7 @@ const useFileOperations = ({ excalidrawAPI, sceneElementsRef, appStateRef }) => 
         console.log("[useFileOperations] No current file, triggering 'Save As'");
         return handleSaveAs();
       }
-      const content = serializeScene(sceneElementsRef, appStateRef, excalidrawAPI);
+      const content = getSerializedScene();
       const success = await window.electronAPI.writeFile(currentFilePathRef.current, content);
       if (success) {
         console.log("[useFileOperations] Saved to existing file:", currentFilePathRef.current);
@@ -104,27 +110,23 @@ const useFileOperations = ({ excalidrawAPI, sceneElementsRef, appStateRef }) => 
         console.error("[useFileOperations] Failed to read file from OS:", filePath);
         return;
       }
-      const initialData = parseInitialData(content);
+      const data = parseInitialData(content);
+      if (!data) return;
       console.log("[useFileOperations] Opened file from OS and loaded data:", filePath);
 
-      loadScene(excalidrawAPI, initialData);
+      loadScene(excalidrawAPI, data);
       setCurrentFilePath(filePath);
     };
 
-    window.electronAPI.onMenuNew(handleNew);
-    window.electronAPI.onMenuOpen(handleOpen);
-    window.electronAPI.onMenuSave(handleSave);
-    window.electronAPI.onMenuSaveAs(handleSaveAs);
-    window.electronAPI.onOpenFile(handleOpenFileFromOS);
+    const unsubs = [
+      window.electronAPI.onMenuNew(handleNew),
+      window.electronAPI.onMenuOpen(handleOpen),
+      window.electronAPI.onMenuSave(handleSave),
+      window.electronAPI.onMenuSaveAs(handleSaveAs),
+      window.electronAPI.onOpenFile(handleOpenFileFromOS),
+    ];
 
-    // cleanup: remove listeners when deps change or on unmount
-    return () => {
-      window.electronAPI.offMenuNew(handleNew);
-      window.electronAPI.offMenuOpen(handleOpen);
-      window.electronAPI.offMenuSave(handleSave);
-      window.electronAPI.offMenuSaveAs(handleSaveAs);
-      window.electronAPI.offOpenFile(handleOpenFileFromOS);
-    };
+    return () => unsubs.forEach((unsub) => unsub());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [excalidrawAPI]);
 

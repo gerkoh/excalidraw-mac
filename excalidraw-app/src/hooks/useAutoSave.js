@@ -1,5 +1,4 @@
 import { useRef, useEffect } from "react";
-import { serializeScene } from "../utils/sceneUtils";
 
 const isElementsChanged = (prev, next) => {
   if (!Array.isArray(prev) || !Array.isArray(next)) return true;
@@ -12,7 +11,7 @@ const isElementsChanged = (prev, next) => {
   return false;
 };
 
-const useAutoSave = ({ sceneElementsRef, appStateRef, currentFilePath, config, excalidrawAPI }) => {
+const useAutoSave = ({ sceneElementsRef, currentFilePath, config, excalidrawAPI, getSerializedScene }) => {
   const prevElementsRef = useRef();
   const debounceTimerRef = useRef(null);
   const isSavingRef = useRef(false); // mutex to prevent overlapping saves
@@ -55,7 +54,7 @@ const useAutoSave = ({ sceneElementsRef, appStateRef, currentFilePath, config, e
         debounceTimerRef.current = setTimeout(() => {
           console.log("[useAutoSave] Changes settled, saving to:", currentFilePath);
 
-          const content = serializeScene(sceneElementsRef, appStateRef, excalidrawAPI);
+          const content = getSerializedScene();
 
           const saveToFile = async () => {
             if (isSavingRef.current) {

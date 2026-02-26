@@ -19,18 +19,27 @@ contextBridge.exposeInMainWorld("electronAPI", {
   saveFileDialog: (content) => ipcRenderer.invoke("save-file-dialog", content),
 
   // Menu event listeners (main process → renderer)
-  onMenuNew: (callback) => ipcRenderer.on("menu-new", callback),
-  onMenuOpen: (callback) => ipcRenderer.on("menu-open", callback),
-  onMenuSave: (callback) => ipcRenderer.on("menu-save", callback),
-  onMenuSaveAs: (callback) => ipcRenderer.on("menu-save-as", callback),
+  // Each returns an unsubscribe function for cleanup
+  onMenuNew: (callback) => {
+    ipcRenderer.on("menu-new", callback);
+    return () => ipcRenderer.removeListener("menu-new", callback);
+  },
+  onMenuOpen: (callback) => {
+    ipcRenderer.on("menu-open", callback);
+    return () => ipcRenderer.removeListener("menu-open", callback);
+  },
+  onMenuSave: (callback) => {
+    ipcRenderer.on("menu-save", callback);
+    return () => ipcRenderer.removeListener("menu-save", callback);
+  },
+  onMenuSaveAs: (callback) => {
+    ipcRenderer.on("menu-save-as", callback);
+    return () => ipcRenderer.removeListener("menu-save-as", callback);
+  },
 
   // OS open-file event (double-click / Open With)
-  onOpenFile: (callback) => ipcRenderer.on("open-file", callback),
-  offOpenFile: (callback) => ipcRenderer.removeListener("open-file", callback),
-
-  // Cleanup listeners
-  offMenuNew: (callback) => ipcRenderer.removeListener("menu-new", callback),
-  offMenuOpen: (callback) => ipcRenderer.removeListener("menu-open", callback),
-  offMenuSave: (callback) => ipcRenderer.removeListener("menu-save", callback),
-  offMenuSaveAs: (callback) => ipcRenderer.removeListener("menu-save-as", callback),
+  onOpenFile: (callback) => {
+    ipcRenderer.on("open-file", callback);
+    return () => ipcRenderer.removeListener("open-file", callback);
+  },
 });
