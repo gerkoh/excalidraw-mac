@@ -11,7 +11,13 @@ const isElementsChanged = (prev, next) => {
   return false;
 };
 
-const useAutoSave = ({ sceneElementsRef, currentFilePath, config, excalidrawAPI, getSerializedScene }) => {
+const useAutoSave = ({
+  sceneElementsRef,
+  currentFilePath,
+  config,
+  excalidrawAPI,
+  getSerializedScene,
+}) => {
   const prevElementsRef = useRef();
   const debounceTimerRef = useRef(null);
   const isSavingRef = useRef(false); // mutex to prevent overlapping saves

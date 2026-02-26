@@ -5,7 +5,10 @@ const parseInitialData = (content, scrollToContent = true) => {
   try {
     parsed = JSON.parse(content);
   } catch (err) {
-    console.error("[sceneUtils] Likely malformed content in file, failed to parse scene data:", err);
+    console.error(
+      "[sceneUtils] Likely malformed content in file, failed to parse scene data:",
+      err,
+    );
     return null;
   }
 

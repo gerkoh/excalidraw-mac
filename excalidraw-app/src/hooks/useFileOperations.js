@@ -1,7 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { parseInitialData, loadScene } from "../utils/sceneUtils";
 
-const useFileOperations = ({ excalidrawAPI, sceneElementsRef, appStateRef, getSerializedScene }) => {
+const useFileOperations = ({
+  excalidrawAPI,
+  sceneElementsRef,
+  appStateRef,
+  getSerializedScene,
+}) => {
   // current file path is stored in this hook and passed to App.jsx -> useAutoSave
   const [currentFilePath, setCurrentFilePath] = useState(null);
   const currentFilePathRef = useRef(currentFilePath);
