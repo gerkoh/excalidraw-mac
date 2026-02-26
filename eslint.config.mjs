@@ -53,6 +53,7 @@ export default [
         module: "readonly",
         process: "readonly",
         console: "readonly",
+        setTimeout: "readonly",
       },
     },
   },

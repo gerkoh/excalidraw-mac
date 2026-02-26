@@ -42,4 +42,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("open-file", callback);
     return () => ipcRenderer.removeListener("open-file", callback);
   },
+
+  // Before-close event (main process asks renderer to save before closing)
+  onBeforeClose: (callback) => {
+    ipcRenderer.on("before-close", callback);
+    return () => ipcRenderer.removeListener("before-close", callback);
+  },
+  acknowledgeClose: () => ipcRenderer.send("close-acknowledged"),
 });

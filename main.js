@@ -131,6 +131,41 @@ const createWindow = () => {
     },
   });
 
+  // Intercept close to let the renderer do a final save before the window is destroyed
+  let allowClose = false;
+  let isQuitting = false;
+
+  app.on("before-quit", () => {
+    isQuitting = true;
+  });
+
+  const finishClose = () => {
+    allowClose = true;
+    win.close();
+    if (isQuitting) {
+      app.quit();
+    }
+  };
+
+  const onCloseAcknowledged = () => finishClose();
+
+  win.on("close", (e) => {
+    if (allowClose) return;
+    e.preventDefault();
+    win.webContents.send("before-close");
+
+    // Safety timeout: force close if renderer doesn't acknowledge (e.g. crash, not yet loaded)
+    setTimeout(() => {
+      if (!allowClose) {
+        console.warn("[main] Close not acknowledged in time, forcing close");
+        ipcMain.removeListener("close-acknowledged", onCloseAcknowledged);
+        finishClose();
+      }
+    }, 3000);
+  });
+
+  ipcMain.once("close-acknowledged", onCloseAcknowledged);
+
   win.loadFile("./excalidraw-app/dist/index.html");
   return win;
 };

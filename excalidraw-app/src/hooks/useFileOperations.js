@@ -57,9 +57,18 @@ const useFileOperations = ({
   useEffect(() => {
     if (!excalidrawAPI) return;
 
+    // Save the current file before switching to a new one
+    const saveCurrentFile = async () => {
+      if (!currentFilePathRef.current) return;
+      const content = getSerializedScene();
+      await window.electronAPI.writeFile(currentFilePathRef.current, content);
+      console.log("[useFileOperations] Saved before switching:", currentFilePathRef.current);
+    };
+
     // ⌘N - new file
     const handleNew = async () => {
       console.log("[useFileOperations] ⌘N New file operation triggered");
+      await saveCurrentFile();
       excalidrawAPI.resetScene();
       sceneElementsRef.current = null;
       appStateRef.current = null;
@@ -74,6 +83,7 @@ const useFileOperations = ({
       const result = await window.electronAPI.openFileDialog();
       if (!result) return; // user cancelled
 
+      await saveCurrentFile();
       const data = parseInitialData(result.content);
       if (!data) return;
       console.log("[useFileOperations] Opened file and loaded data:", result.path);
@@ -110,6 +120,7 @@ const useFileOperations = ({
 
     // OS-level open-file (double-click / Open With)
     const handleOpenFileFromOS = async (_event, filePath) => {
+      await saveCurrentFile();
       const content = await window.electronAPI.readFile(filePath);
       if (!content) {
         console.error("[useFileOperations] Failed to read file from OS:", filePath);
@@ -123,12 +134,23 @@ const useFileOperations = ({
       setCurrentFilePath(filePath);
     };
 
+    // Final save before window closes (Cmd+Q, Cmd+W, close button)
+    const handleBeforeClose = async () => {
+      if (currentFilePathRef.current) {
+        console.log("[useFileOperations] Before-close: saving to", currentFilePathRef.current);
+        const content = getSerializedScene();
+        await window.electronAPI.writeFile(currentFilePathRef.current, content);
+      }
+      window.electronAPI.acknowledgeClose();
+    };
+
     const unsubs = [
       window.electronAPI.onMenuNew(handleNew),
       window.electronAPI.onMenuOpen(handleOpen),
       window.electronAPI.onMenuSave(handleSave),
       window.electronAPI.onMenuSaveAs(handleSaveAs),
       window.electronAPI.onOpenFile(handleOpenFileFromOS),
+      window.electronAPI.onBeforeClose(handleBeforeClose),
     ];
 
     return () => unsubs.forEach((unsub) => unsub());

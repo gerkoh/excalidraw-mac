@@ -35,16 +35,24 @@ sequenceDiagram
     Preload->>Main: invoke "write-file"
     Main->>FS: write .excalidraw file
 
-    Note over App: ⌘N (New)
-    Main->>App: menu-new event
-    App->>App: resetScene(), clear state
-    Main->>Store: set lastOpenedPath = null
+    Note over App: ⌘N (New) / ⌘O (Open)
+    Main->>App: menu-new / menu-open event
+    App->>App: save current file before switching
+    App->>App: resetScene() or loadScene()
+    Main->>Store: set lastOpenedPath
 
-    Note over App: ⌘O / ⌘S / ⇧⌘S
+    Note over App: ⌘S / ⇧⌘S
     Main->>App: menu event
-    App->>Preload: openFileDialog() / saveFileDialog()
+    App->>Preload: saveFileDialog() / writeFile()
     Preload->>Main: IPC
     Main->>Store: set lastOpenedPath = selected path
+
+    Note over App: ⌘W (Close) / ⌘Q (Quit)
+    Main->>App: before-close event
+    App->>App: final save (viewport + scene)
+    App->>Preload: acknowledgeClose()
+    Preload->>Main: close-acknowledged
+    Main->>Main: close window (+ quit if ⌘Q)
 
 ```
 
@@ -62,6 +70,12 @@ Electron's sandboxed preload scripts [don't support ESM](https://www.electronjs.
 - `FileSystemFileHandle` objects can't be sent across the IPC boundary (not serializable)
 - `fs.writeFileSync` runs in the **main process** (privileged), following Electron's security model: renderer requests → main process executes
 - Content is serialized via Excalidraw's `serializeAsJSON()` which outputs the standard `.excalidraw` JSON format
+
+### #3 Why is viewport state (scroll/zoom) re-injected after serialization?
+
+Excalidraw's `serializeAsJSON()` uses an internal config (`APP_STATE_STORAGE_CONF`) that marks `scrollX`, `scrollY`, and `zoom` as `export: false` — they're intentionally stripped for portable `.excalidraw` files. Since this is a desktop app that should resume exactly where you left off, `serializeScene()` re-injects these fields after serialization. On load, `parseInitialData()` checks if viewport fields exist: if present, the saved position is restored; if absent (e.g., a file from excalidraw.com), it falls back to `scrollToContent`.
+
+A final save is triggered on window close (⌘W) and app quit (⌘Q) via a `before-close` → `close-acknowledged` IPC handshake, ensuring the latest viewport is always persisted. File switches (⌘N, ⌘O) also save the current file before loading the new one.
 
 ## Getting Started
 
