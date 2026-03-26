@@ -2,6 +2,35 @@
 
 A desktop application for [Excalidraw](https://excalidraw.com/), which auto-saves your drawings to local files.
 
+## Getting Started
+
+1. Install dependencies.
+2. Set your preferences in `config.json` (window size, auto-save timing, default open directory).
+3. Build and package the app.
+
+```bash
+npm install
+npm run compile   # lint -> format -> build -> package DMG
+```
+
+### Future maintenance - Upgrading Excalidraw
+
+If you upgrade `@excalidraw/excalidraw`, refresh the bundled font assets so the app uses matching fonts.
+
+```bash
+npm install @excalidraw/excalidraw@latest
+rm -rf excalidraw-app/public/fonts
+cp -r node_modules/@excalidraw/excalidraw/dist/prod/fonts excalidraw-app/public/
+npm ls @excalidraw/excalidraw
+npm run build
+```
+
+Then launch with:
+
+```bash
+npm start
+```
+
 ## Architecture
 
 ```mermaid
@@ -77,16 +106,6 @@ Excalidraw's `serializeAsJSON()` uses an internal config (`APP_STATE_STORAGE_CON
 
 A final save is triggered on window close (⌘W) and app quit (⌘Q) via a `before-close` → `close-acknowledged` IPC handshake, ensuring the latest viewport is always persisted. File switches (⌘N, ⌘O) also save the current file before loading the new one.
 
-## Getting Started
-
-1. Set your preferences in `config.json` (window size, auto-save timing, default open directory).
-2. Run `npm run compile` — this lints, formats, builds, and packages the DMG in one step.
-
-```bash
-npm install
-npm run compile   # lint → format → build → package DMG
-```
-
 ### Configuration (`config.json`)
 
 | Option                    | Type   | Default | Description                                       |
@@ -96,6 +115,13 @@ npm run compile   # lint → format → build → package DMG
 | `autoSaveDebounceMs`      | number | 2000    | Debounce delay in milliseconds before auto-saving |
 | `autoSaveCheckIntervalMs` | number | 500     | Interval in milliseconds to check for changes     |
 | `defaultOpenDir`          | string | (none)  | Default directory for file open/save dialogs      |
+
+For the auto-save feature: The app automatically saves your drawing to the last opened file. Changes are debounced (default 2 seconds) to avoid excessive disk writes. The auto-save behavior can be configured via `config.json`:
+
+- `autoSaveDebounceMs` — delay before saving after changes (default: 2000ms)
+- `autoSaveCheckIntervalMs` — how often to check for changes (default: 500ms)
+
+If no file is open, the app will prompt you to save when you make changes.
 
 ### Scripts
 
@@ -125,24 +151,6 @@ The app also supports **file association** — double-clicking a `.excalidraw` f
 ### Drag-and-drop + undo can lose images
 
 If you drag and drop images onto the canvas and then undo, the embedded image data will be lost. To be safe, keep a backup of your `.excalidraw` file before drag-and-drop operations involving images.
-
-## Auto-Save
-
-The app automatically saves your drawing to the last opened file. Changes are debounced (default 2 seconds) to avoid excessive disk writes. The auto-save behavior can be configured via `config.json`:
-
-- `autoSaveDebounceMs` — delay before saving after changes (default: 2000ms)
-- `autoSaveCheckIntervalMs` — how often to check for changes (default: 500ms)
-
-If no file is open, the app will prompt you to save when you make changes.
-
-## Updating Excalidraw Fonts
-
-After upgrading the `@excalidraw/excalidraw` package, re-copy the font assets:
-
-```bash
-npm install @excalidraw/excalidraw@latest
-cp -r node_modules/@excalidraw/excalidraw/dist/prod/fonts excalidraw-app/public/
-```
 
 ## References
 
