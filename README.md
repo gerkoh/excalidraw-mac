@@ -128,7 +128,6 @@ If no file is open, the app will prompt you to save when you make changes.
 | Command           | Description                                       |
 | ----------------- | ------------------------------------------------- |
 | `npm start`       | Launch the Electron app (requires a prior build)  |
-| `npm run dev`     | Start the Vite dev server (renderer only)         |
 | `npm run build`   | Build the renderer app for production             |
 | `npm run dmg`     | Package the app into a DMG using electron-builder |
 | `npm run compile` | Lint → Format → Build → Package DMG               |
