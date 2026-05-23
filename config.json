@@ -3,5 +3,19 @@
   "windowHeight": 982,
   "autoSaveDebounceMs": 2000,
   "autoSaveCheckIntervalMs": 500,
-  "defaultOpenDir": "/Users/geraldkoh/Desktop/excalidraw-assets"
+  "defaultOpenDir": "/Users/geraldkoh/Desktop/excalidraw-assets",
+  "copilot": {
+    "enabled": true,
+    "maxModelApiAttempts": 5,
+    "explanation": {
+      "provider": "google",
+      "model": "gemini-2.5-flash",
+      "systemPrompt": "You explain concepts clearly and deeply. When diagrams are created, reference them explicitly and summarize how the visual structure supports the explanation."
+    },
+    "diagram": {
+      "provider": "google",
+      "model": "gemini-2.5-flash",
+      "systemPrompt": "Create clear Excalidraw diagrams that help a human understand the user's question. Prefer simple labeled shapes, directional arrows, and small groups over dense canvases."
+    }
+  }
 }

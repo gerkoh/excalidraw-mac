@@ -1,12 +1,16 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
 const path = require("path");
 const fs = require("fs");
+// Dev: project-root .env. Packaged: userData .env overrides (loaded in app.whenReady).
+require("dotenv").config({ path: path.join(__dirname, ".env") });
 const Store = require("electron-store");
+const { CopilotAgentSession } = require("./copilot-agent");
 
 // stores last opened file path (initialized after app is initialized)
 let store;
+let copilotSession;
 
-// config file path — in dev, config.json is in project root (__dirname);
+// config file path - in dev, config.json is in project root (__dirname);
 // in production, electron-builder copies it to Contents/Resources/
 const configPath = app.isPackaged
   ? path.join(process.resourcesPath, "config.json")
@@ -33,6 +37,11 @@ const isAllowedPath = (filePath) => {
 
 const registerIpcHandlers = () => {
   ipcMain.handle("get-config", () => readConfig());
+
+  ipcMain.handle("copilot:start", () => copilotSession.start());
+  ipcMain.handle("copilot:send", (_event, text) => copilotSession.send(text));
+  ipcMain.handle("copilot:abort", () => copilotSession.abort());
+  ipcMain.handle("copilot:reset", () => copilotSession.reset());
 
   ipcMain.handle("read-file", (_event, filePath) => {
     try {
@@ -289,8 +298,17 @@ app.on("open-file", (event, filePath) => {
 });
 
 app.whenReady().then(() => {
+  require("dotenv").config({
+    path: path.join(app.getPath("userData"), ".env"),
+    override: true,
+  });
+
   // saves to ~/Library/Application Support/excalidraw-mac/excalidraw-mac.json
   store = new Store({ name: "excalidraw-mac" });
+  copilotSession = new CopilotAgentSession({
+    getConfig: readConfig,
+    getWindows: () => BrowserWindow.getAllWindows(),
+  });
 
   registerIpcHandlers();
   buildMenu();
@@ -304,5 +322,6 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
+  copilotSession?.dispose();
   if (process.platform !== "darwin") app.quit();
 });

@@ -1,5 +1,7 @@
 # Excalidraw Mac
 
+![MCP preview](./mcp-preview.gif)
+
 A desktop application for [Excalidraw](https://excalidraw.com/), which auto-saves your drawings to local files.
 
 ## Getting Started
@@ -32,6 +34,57 @@ npm start
 ```
 
 ## Architecture
+
+The app splits work across Electron’s **main process** (privileged I/O and the copilot agent), a **preload** bridge (narrow `contextBridge` API), and the **renderer** (Vite-built React UI hosting Excalidraw and the Copilot sidebar). Diagram elements from the model stream over dedicated IPC channels into `App.jsx`, which converts and merges them into the canvas.
+
+```mermaid
+flowchart TB
+  subgraph ext["Configuration & secrets"]
+    cfg["config.json"]
+    dotenv[".env\n(API keys)"]
+  end
+
+  subgraph main["Main process"]
+    mainjs["main.js\nwindow, menu, IPC handlers"]
+    sess["copilot/\nCopilotAgentSession"]
+    pi["pi-agent-core + pi-ai"]
+    fs["fs + dialogs"]
+    store["electron-store\nlastOpenedPath"]
+    mainjs --> sess
+    sess --> pi
+    mainjs --> fs
+    mainjs --> store
+  end
+
+  subgraph preload["Preload"]
+    bridge["preload.js\ncontextBridge → electronAPI"]
+  end
+
+  subgraph rend["Renderer (excalidraw-app)"]
+    app["App.jsx\nExcalidraw API, convertCopilotElements, camera"]
+    ex["Excalidraw canvas"]
+    side["Copilot sidebar\nCopilotProvider, tools UI"]
+    app --> ex
+    app --> side
+    side --> app
+  end
+
+  subgraph cloud["Network"]
+    llm["LLM APIs\n(stream + tools)"]
+  end
+
+  cfg --> mainjs
+  dotenv --> sess
+  pi --> llm
+
+  rend <-->|IPC invoke| bridge
+  bridge <-->|ipcMain| mainjs
+
+  mainjs -->|push events| bridge
+  bridge -->|onCopilot*| rend
+```
+
+### Runtime sequence (files, menu, and close)
 
 ```mermaid
 sequenceDiagram
@@ -89,20 +142,20 @@ sequenceDiagram
 
 ### #1 Why CommonJS?
 
-Electron's sandboxed preload scripts [don't support ESM](https://www.electronjs.org/docs/latest/tutorial/esm#sandboxed-preload-scripts-cant-use-esm-imports), so `preload.js` and `main.js` must use `require()`. This is why `package.json` sets `"type": "commonjs"`. The renderer files under `excalidraw-app/src/` still use ESM `import`/`export` — Vite handles those, not Node.js.
+Electron's sandboxed preload scripts [don't support ESM](https://www.electronjs.org/docs/latest/tutorial/esm#sandboxed-preload-scripts-cant-use-esm-imports), so `preload.js` and `main.js` must use `require()`. This is why `package.json` sets `"type": "commonjs"`. The renderer files under `excalidraw-app/src/` still use ESM `import`/`export` - Vite handles those, not Node.js.
 
 [`electron-store`](https://github.com/sindresorhus/electron-store) moved to ESM-only in recent versions, and dynamic `import()` breaks inside packaged asar archives. To stay compatible, this project pins **v8** (the last CJS release).
 
 ### #2 Why is fs.writeFileSync used instead of fileHandle.createWritable()?
 
-- `fileHandle.createWritable()` is a browser [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/FileSystemWritableFileStream) — it runs in the renderer, which is sandboxed and shouldn't own filesystem operations
+- `fileHandle.createWritable()` is a browser [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/FileSystemWritableFileStream) - it runs in the renderer, which is sandboxed and shouldn't own filesystem operations
 - `FileSystemFileHandle` objects can't be sent across the IPC boundary (not serializable)
 - `fs.writeFileSync` runs in the **main process** (privileged), following Electron's security model: renderer requests → main process executes
 - Content is serialized via Excalidraw's `serializeAsJSON()` which outputs the standard `.excalidraw` JSON format
 
 ### #3 Why is viewport state (scroll/zoom) re-injected after serialization?
 
-Excalidraw's `serializeAsJSON()` uses an internal config (`APP_STATE_STORAGE_CONF`) that marks `scrollX`, `scrollY`, and `zoom` as `export: false` — they're intentionally stripped for portable `.excalidraw` files. Since this is a desktop app that should resume exactly where you left off, `serializeScene()` re-injects these fields after serialization. On load, `parseInitialData()` checks if viewport fields exist: if present, the saved position is restored; if absent (e.g., a file from excalidraw.com), it falls back to `scrollToContent`.
+Excalidraw's `serializeAsJSON()` uses an internal config (`APP_STATE_STORAGE_CONF`) that marks `scrollX`, `scrollY`, and `zoom` as `export: false` - they're intentionally stripped for portable `.excalidraw` files. Since this is a desktop app that should resume exactly where you left off, `serializeScene()` re-injects these fields after serialization. On load, `parseInitialData()` checks if viewport fields exist: if present, the saved position is restored; if absent (e.g., a file from excalidraw.com), it falls back to `scrollToContent`.
 
 A final save is triggered on window close (⌘W) and app quit (⌘Q) via a `before-close` → `close-acknowledged` IPC handshake, ensuring the latest viewport is always persisted. File switches (⌘N, ⌘O) also save the current file before loading the new one.
 
@@ -116,10 +169,28 @@ A final save is triggered on window close (⌘W) and app quit (⌘Q) via a `befo
 | `autoSaveCheckIntervalMs` | number | 500     | Interval in milliseconds to check for changes     |
 | `defaultOpenDir`          | string | (none)  | Default directory for file open/save dialogs      |
 
-For the auto-save feature: The app automatically saves your drawing to the last opened file. Changes are debounced (default 2 seconds) to avoid excessive disk writes. The auto-save behavior can be configured via `config.json`:
+#### Copilot (`config.json` → `copilot`)
 
-- `autoSaveDebounceMs` — delay before saving after changes (default: 2000ms)
-- `autoSaveCheckIntervalMs` — how often to check for changes (default: 500ms)
+| Option | Type | Default | Description |
+| ------ | ---- | ------- | ----------- |
+| `copilot.enabled` | boolean | `true` | Show the Copilot sidebar and run the agent pipeline |
+| `copilot.explanation.provider` | string | (required) | LLM provider for explanations (e.g. `google`) |
+| `copilot.explanation.model` | string | (required) | Model id for explanations |
+| `copilot.explanation.systemPrompt` | string | built-in default | Extra instructions for the explanation agent |
+| `copilot.diagram.provider` | string | (optional) | Separate provider for diagram JSON generation |
+| `copilot.diagram.model` | string | (optional) | Separate model for diagrams; omit both diagram fields to reuse the explanation model |
+| `copilot.diagram.systemPrompt` | string | (optional) | Extra diagram instructions appended to the cheat sheet |
+
+**API keys:** copy `.env.example` to `.env` in the project root for local development. For packaged builds, place `.env` in the app userData directory (on macOS: `~/Library/Application Support/excalidraw-mac/.env`). UserData values override project-root `.env`. Example:
+
+```bash
+GEMINI_API_KEY=your-key-here
+```
+
+Copilot runs a three-phase pipeline in the main process: diagram JSON → canvas streaming (paced in the renderer) → streaming explanation. Diagram failures are shown in the sidebar; the explanation still runs with a failure note in its context. The app automatically saves your drawing to the last opened file. Changes are debounced (default 2 seconds) to avoid excessive disk writes. The auto-save behavior can be configured via `config.json`:
+
+- `autoSaveDebounceMs` - delay before saving after changes (default: 2000ms)
+- `autoSaveCheckIntervalMs` - how often to check for changes (default: 500ms)
 
 If no file is open, the app will prompt you to save when you make changes.
 
@@ -130,7 +201,8 @@ If no file is open, the app will prompt you to save when you make changes.
 | `npm start`       | Launch the Electron app (requires a prior build)  |
 | `npm run build`   | Build the renderer app for production             |
 | `npm run dmg`     | Package the app into a DMG using electron-builder |
-| `npm run compile` | Lint → Format → Build → Package DMG               |
+| `npm run test`    | Run Vitest unit tests                             |
+| `npm run compile` | Lint → Test → Format → Build → Package DMG        |
 | `npm run lint`    | Run ESLint                                        |
 | `npm run format`  | Run Prettier                                      |
 
@@ -143,7 +215,7 @@ If no file is open, the app will prompt you to save when you make changes.
 | ⌘S       | Save        |
 | ⌘⇧S      | Save As     |
 
-The app also supports **file association** — double-clicking a `.excalidraw` file or using "Open With" will launch the app and load that file.
+The app also supports **file association** - double-clicking a `.excalidraw` file or using "Open With" will launch the app and load that file.
 
 ## Known Limitations
 

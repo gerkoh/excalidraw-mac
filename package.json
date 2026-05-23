@@ -11,16 +11,26 @@
     "build": "vite build",
     "dmg": "electron-builder",
     "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "format": "prettier --write .",
-    "compile": "npm run lint && npm run format && npm run build && npm run dmg"
+    "compile": "npm run lint && npm run test && npm run format && npm run build && npm run dmg"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^3.0.0",
+    "@earendil-works/pi-agent-core": "^0.74.0",
+    "@earendil-works/pi-ai": "^0.74.0",
     "@excalidraw/excalidraw": "^0.18.1",
+    "dotenv": "^17.4.2",
     "electron-store": "^8.2.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
     "@vitejs/plugin-react": "^6.0.1",
     "electron": "^41.0.4",
     "electron-builder": "^26.7.0",
@@ -28,11 +38,17 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
+    "jsdom": "^26.1.0",
     "prettier": "^3.8.1",
-    "vite": "^8.0.3"
+    "vite": "^8.0.3",
+    "vitest": "^3.2.4"
   },
   "overrides": {
-    "lodash-es": "^4.18.1"
+    "lodash-es": "^4.18.1",
+    "nanoid": "3.3.11",
+    "@excalidraw/mermaid-to-excalidraw": {
+      "nanoid": "5.1.11"
+    }
   },
   "engines": {
     "node": "^20.19.0 || >=22.12.0"

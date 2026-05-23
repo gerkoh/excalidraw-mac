@@ -4,10 +4,13 @@ import "@excalidraw/excalidraw/index.css";
 import { useState, useRef, useCallback, useEffect } from "react";
 import useAutoSave from "./hooks/useAutoSave";
 import useFileOperations from "./hooks/useFileOperations";
+import useCopilotDiagram from "./hooks/useCopilotDiagram";
 import { serializeScene } from "./utils/sceneUtils";
+import Sidebar from "./copilot/SidebarContent";
+import SidebarTrigger from "./copilot/SidebarTrigger";
 
 export default function App() {
-  // on startup, we load config and check if there's a file to open (pending from OS or last opened)
+  // On startup, load config and check if there's a file to open (pending from OS or last opened)
   const [config, setConfig] = useState(null);
   useEffect(() => {
     const loadConfig = async () => {
@@ -31,8 +34,7 @@ export default function App() {
     [excalidrawAPI],
   );
 
-  // handle menu events (New, Open, Save, Save As)
-  // handle file open from finder
+  // Handle menu events (New, Open, Save, Save As) and OS file open
   const { currentFilePath, initialData } = useFileOperations({
     excalidrawAPI,
     sceneElementsRef,
@@ -40,11 +42,20 @@ export default function App() {
     getSerializedScene,
   });
 
-  // auto-save writes to the current file path (inactive until a file is opened/saved)
-  useAutoSave({ sceneElementsRef, currentFilePath, config, excalidrawAPI, getSerializedScene });
+  // Auto-save to the current file path (inactive until a file is opened/saved)
+  useAutoSave({
+    sceneElementsRef,
+    currentFilePath,
+    config,
+    excalidrawAPI,
+    getSerializedScene,
+  });
 
-  // Excalidraw fires onChange on every interaction
-  // capture latest scene elements and app state for save operations
+  // Streaming copilot diagram rendering (element-by-element with camera animation)
+  useCopilotDiagram({ excalidrawAPI, sceneElementsRef });
+
+  // Excalidraw fires onChange on every interaction -
+  // capture latest scene elements and app state for save operations.
   const handleChange = useCallback((sceneElements, appState) => {
     appStateRef.current = appState;
     sceneElementsRef.current = sceneElements;
@@ -55,6 +66,8 @@ export default function App() {
   if (initialData === undefined) {
     return null;
   }
+
+  const isCopilotEnabled = config?.copilot?.enabled !== false;
 
   return (
     <div style={{ height: "100vh" }}>
@@ -69,7 +82,12 @@ export default function App() {
             export: false,
           },
         }}
-      />
+        renderTopRightUI={() =>
+          isCopilotEnabled ? <SidebarTrigger /> : null
+        }
+      >
+        {isCopilotEnabled ? <Sidebar /> : null}
+      </Excalidraw>
     </div>
   );
 }
