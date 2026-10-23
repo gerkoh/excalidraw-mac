@@ -1,0 +1,28 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "automerge": true,
+    "automergeStrategy": "squash",
+    "schedule": ["before 6am on monday"]
+  },
+  "vulnerabilityAlerts": {
+    "enabled": true
+  },
+  "packageRules": [
+    {
+      "description": "Automerge non-major npm updates. package.json ranges stay; package-lock.json moves.",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "rangeStrategy": "update-lockfile",
+      "automerge": true,
+      "automergeStrategy": "squash"
+    },
+    {
+      "description": "Major updates stay open for review, including a major security bump.",
+      "matchUpdateTypes": ["major"],
+      "automerge": false
+    }
+  ]
+}
