@@ -12,10 +12,14 @@
   },
   "packageRules": [
     {
-      "description": "Automerge non-major npm updates. package.json ranges stay; package-lock.json moves.",
+      "description": "Keep package.json ranges stable and move resolved versions in package-lock.json.",
+      "matchManagers": ["npm"],
+      "rangeStrategy": "update-lockfile"
+    },
+    {
+      "description": "Automerge non-major npm updates.",
       "matchManagers": ["npm"],
       "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
-      "rangeStrategy": "update-lockfile",
       "automerge": true,
       "automergeStrategy": "squash"
     },
