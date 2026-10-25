@@ -1,7 +1,9 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
 const path = require("path");
 const fs = require("fs");
-const Store = require("electron-store");
+// electron-store v12 is ESM-only. Electron 45's Node can require() it;
+// the class is the default export.
+const { default: Store } = require("electron-store");
 
 // stores last opened file path (initialized after app is initialized)
 let store;

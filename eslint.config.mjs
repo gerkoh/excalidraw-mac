@@ -60,7 +60,7 @@ export default [
 
   // Vite config (ESM, Node)
   {
-    files: ["vite.config.js"],
+    files: ["vite.config.mjs"],
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "module",

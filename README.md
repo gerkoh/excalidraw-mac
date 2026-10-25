@@ -4,6 +4,8 @@ A desktop application for [Excalidraw](https://excalidraw.com/), which auto-save
 
 ## Getting Started
 
+Requires Node.js 22.12 or newer. Electron 45 and `electron-store` 12 both require it.
+
 1. Install dependencies.
 2. Set your preferences in `config.json` (window size, auto-save timing, default open directory).
 3. Build and package the app.
@@ -12,6 +14,8 @@ A desktop application for [Excalidraw](https://excalidraw.com/), which auto-save
 npm install
 npm run compile   # lint -> format -> build -> package DMG
 ```
+
+4. Open the DMG in `dist/` and drag **excalidraw-mac** into Applications. Spotlight lists apps from there; search for `excalidraw-mac`.
 
 ### Future maintenance - Upgrading Excalidraw
 
@@ -91,7 +95,7 @@ sequenceDiagram
 
 Electron's sandboxed preload scripts [don't support ESM](https://www.electronjs.org/docs/latest/tutorial/esm#sandboxed-preload-scripts-cant-use-esm-imports), so `preload.js` and `main.js` must use `require()`. This is why `package.json` sets `"type": "commonjs"`. The renderer files under `excalidraw-app/src/` still use ESM `import`/`export` — Vite handles those, not Node.js.
 
-[`electron-store`](https://github.com/sindresorhus/electron-store) moved to ESM-only in recent versions, and dynamic `import()` breaks inside packaged asar archives. To stay compatible, this project pins **v8** (the last CJS release).
+[`electron-store`](https://github.com/sindresorhus/electron-store) v12 is ESM-only and requires Node.js 22 or newer (and Electron 30 or newer). Electron 45 bundles Node.js 24, so `main.js` loads it with `require()` and takes the default export. That stays on the CommonJS loader, which still resolves inside a packaged asar. Dynamic `import()` is not used for this module, because that loader does not resolve packages inside asar archives.
 
 ### #2 Why is fs.writeFileSync used instead of fileHandle.createWritable()?
 
