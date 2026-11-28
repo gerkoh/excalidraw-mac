@@ -9,7 +9,7 @@ const {
   UNTITLED,
   formatWindowTitle,
   applyCurrentFileToWindow,
-  createSetCurrentFileHandler,
+  applyReportedFile,
   createCurrentFileRecorder,
   isReadableFile,
   missingFileError,
@@ -111,25 +111,17 @@ describe("applyCurrentFileToWindow", () => {
   });
 });
 
-describe("createSetCurrentFileHandler", () => {
-  const setup = ({ win = createFakeWindow() } = {}) => {
-    const getWindowFromWebContents = vi.fn(() => win);
-    const handler = createSetCurrentFileHandler({ isAllowedPath, getWindowFromWebContents });
-    const sender = { id: 1 };
-    return { handler, win, getWindowFromWebContents, event: { sender } };
-  };
-
-  it("applies the reported file to the sender's window", () => {
-    const { handler, win, getWindowFromWebContents, event } = setup();
-    expect(handler(event, "/Users/me/diagram.excalidraw")).toBe(true);
-    expect(getWindowFromWebContents).toHaveBeenCalledWith(event.sender);
+describe("applyReportedFile", () => {
+  it("applies the reported file to the window", () => {
+    const win = createFakeWindow();
+    expect(applyReportedFile(win, "/Users/me/diagram.excalidraw", isAllowedPath)).toBe(true);
     expect(win.setTitle).toHaveBeenCalledWith("diagram");
     expect(win.setRepresentedFilename).toHaveBeenCalledWith("/Users/me/diagram.excalidraw");
   });
 
   it("accepts null as untitled", () => {
-    const { handler, win, event } = setup();
-    expect(handler(event, null)).toBe(true);
+    const win = createFakeWindow();
+    expect(applyReportedFile(win, null, isAllowedPath)).toBe(true);
     expect(win.setTitle).toHaveBeenCalledWith("Untitled");
     expect(win.setRepresentedFilename).toHaveBeenCalledWith("");
   });
@@ -140,16 +132,14 @@ describe("createSetCurrentFileHandler", () => {
     ["an empty string", ""],
     ["a number", 7],
   ])("rejects %s without touching the window", (_label, value) => {
-    const { handler, win, getWindowFromWebContents, event } = setup();
-    expect(handler(event, value)).toBe(false);
-    expect(getWindowFromWebContents).not.toHaveBeenCalled();
+    const win = createFakeWindow();
+    expect(applyReportedFile(win, value, isAllowedPath)).toBe(false);
     expect(win.setTitle).not.toHaveBeenCalled();
     expect(console.error).toHaveBeenCalled();
   });
 
-  it("returns false when the sender has no window", () => {
-    const { handler, event } = setup({ win: null });
-    expect(handler(event, "/a.excalidraw")).toBe(false);
+  it("returns false without throwing when there is no window", () => {
+    expect(applyReportedFile(null, "/a.excalidraw", isAllowedPath)).toBe(false);
   });
 });
 
@@ -279,15 +269,18 @@ describe("createOpenFileHandler", () => {
     return { deps, win, handle: createOpenFileHandler(deps) };
   };
 
-  it.each([null, undefined, "/Users/me/notes.txt", ""])("ignores disallowed path %j", async (value) => {
-    const { deps, handle } = setup();
-    expect(await handle(value)).toBe("ignored");
-    expect(deps.isReadable).not.toHaveBeenCalled();
-    expect(deps.showError).not.toHaveBeenCalled();
-    expect(deps.recordCurrentFile).not.toHaveBeenCalled();
-    expect(deps.setPendingFile).not.toHaveBeenCalled();
-    expect(deps.confirmReplaceDocument).not.toHaveBeenCalled();
-  });
+  it.each([null, undefined, "/Users/me/notes.txt", ""])(
+    "ignores disallowed path %j",
+    async (value) => {
+      const { deps, handle } = setup();
+      expect(await handle(value)).toBe("ignored");
+      expect(deps.isReadable).not.toHaveBeenCalled();
+      expect(deps.showError).not.toHaveBeenCalled();
+      expect(deps.recordCurrentFile).not.toHaveBeenCalled();
+      expect(deps.setPendingFile).not.toHaveBeenCalled();
+      expect(deps.confirmReplaceDocument).not.toHaveBeenCalled();
+    },
+  );
 
   describe("missing file (e.g. a recent item that was moved or deleted)", () => {
     it.each([

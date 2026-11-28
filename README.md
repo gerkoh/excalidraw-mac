@@ -64,16 +64,12 @@ sequenceDiagram
     Main-->>App: file content
 
     Note over App: User draws…
-    App->>Preload: setDocumentState({ dirty, hasFilePath, hasContent })
+    App->>Preload: setDocumentState({ filePath, dirty, hasFilePath, hasContent })
     Preload->>Main: send "set-document-state"
-    Main->>Main: win.setDocumentEdited(dirty)
+    Main->>Main: window title + proxy icon, win.setDocumentEdited(dirty)
     App->>Preload: writeFile(path, JSON) (debounced)
     Preload->>Main: invoke "write-file"
     Main->>FS: write temp file, fsync, rename over .excalidraw file
-
-    App->>Preload: setCurrentFile(path | null)
-    Preload->>Main: send "set-current-file"
-    Main->>Main: window title + proxy icon
 
     Note over App: ⌘N (New) / ⌘O (Open) / open-file
     Main->>Main: "Save changes?" if untitled + edited + not empty
@@ -102,23 +98,23 @@ sequenceDiagram
 
 ### Module Layout
 
-| Path                                         | Process  | Role                                                                                                               |
-| -------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------ |
-| `main.js`                                    | main     | Wiring only: IPC handlers, windows, menu, OS `open-file`                                                           |
-| `electron/fileService.js`                    | main     | Path validation, config reading, reading and writing `.excalidraw` files                                           |
-| `electron/atomicWrite.js`                    | main     | Atomic file write (temp file, fsync, rename) used for every drawing write                                          |
-| `electron/menu.js`                           | main     | Builds the application menu template (Electron calls are passed in)                                                |
-| `electron/document.js`                       | main     | Window title + proxy icon, "file became current" (lastOpenedPath + Open Recent), OS `open-file` handling           |
-| `electron/theme.js`                          | main     | Appearance preference, effective theme, `nativeTheme.themeSource`, Appearance menu                                 |
-| `electron/unsavedChanges.js`                 | main     | "Save changes?" prompt: when to ask, and what each answer means (pure, see #4)                                     |
-| `electron/windowSession.js`                  | main     | Per-window document state, unsaved-changes guard and close handshake                                               |
-| `electron/navigationGuard.js`                | main     | Opens links in the system browser and keeps the window on the app (see #5)                                         |
-| `preload.js`                                 | preload  | Exposes `window.electronAPI`; self-contained since sandboxed preload can't `require` local files                   |
-| `excalidraw-app/src/App.jsx`                 | renderer | Mounts Excalidraw and wires the hooks                                                                              |
-| `excalidraw-app/src/hooks/`                  | renderer | `useFileOperations` (startup load, menu + OS events), `useAutoSave`, `useReportCurrentFile` (title) and `useTheme` |
-| `excalidraw-app/src/utils/saveController.js` | renderer | Current file, dirty state, debounced + coalesced saves; every renderer write goes through it                       |
-| `excalidraw-app/src/utils/themeUtils.js`     | renderer | Tells Excalidraw's in-app theme toggle apart from prop-driven theme changes                                        |
-| `excalidraw-app/src/utils/sceneUtils.js`     | renderer | Parse, load and serialize scenes (including the viewport, see #3 below)                                            |
+| Path                                         | Process  | Role                                                                                                             |
+| -------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------- |
+| `main.js`                                    | main     | Wiring only: IPC handlers, windows, menu, OS `open-file`                                                         |
+| `electron/fileService.js`                    | main     | Path validation, config reading, reading and writing `.excalidraw` files                                         |
+| `electron/atomicWrite.js`                    | main     | Atomic file write (temp file, fsync, rename) used for every drawing write                                        |
+| `electron/menu.js`                           | main     | Builds the application menu template (Electron calls are passed in)                                              |
+| `electron/document.js`                       | main     | Window title + proxy icon, "file became current" (lastOpenedPath + Open Recent), OS `open-file` handling         |
+| `electron/theme.js`                          | main     | Appearance preference, effective theme, `nativeTheme.themeSource`, Appearance menu                               |
+| `electron/unsavedChanges.js`                 | main     | "Save changes?" prompt: when to ask, and what each answer means (pure, see #4)                                   |
+| `electron/windowSession.js`                  | main     | Per-window document state, unsaved-changes guard and close handshake                                             |
+| `electron/navigationGuard.js`                | main     | Opens links in the system browser and keeps the window on the app (see #5)                                       |
+| `preload.js`                                 | preload  | Exposes `window.electronAPI`; self-contained since sandboxed preload can't `require` local files                 |
+| `excalidraw-app/src/App.jsx`                 | renderer | Mounts Excalidraw and wires the hooks                                                                            |
+| `excalidraw-app/src/hooks/`                  | renderer | `useFileOperations` (startup load, menu + OS events), `useAutoSave` (also reports document state) and `useTheme` |
+| `excalidraw-app/src/utils/saveController.js` | renderer | Current file, dirty state, debounced + coalesced saves; every renderer write goes through it                     |
+| `excalidraw-app/src/utils/themeUtils.js`     | renderer | Tells Excalidraw's in-app theme toggle apart from prop-driven theme changes                                      |
+| `excalidraw-app/src/utils/sceneUtils.js`     | renderer | Parse, load and serialize scenes (including the viewport, see #3 below)                                          |
 
 ## Design Considerations
 
@@ -218,7 +214,7 @@ The app also supports **file association** — double-clicking a `.excalidraw` f
 
 The window title is the current file's name without its extension (`diagram.excalidraw` → "diagram"; only the last extension is dropped, so `a.b.excalidraw` → "a.b"), or "Untitled" when no file is open. On macOS the title also carries a proxy icon: drag it like the file, or ⌘-click the title for the folder path menu.
 
-The renderer's current file is the single source of truth: whenever it changes (startup load, ⌘N, ⌘O, Save As, Finder / Open Recent) the renderer sends `set-current-file` and the main process updates the title and represented filename. The renderer is the only side that knows a file actually loaded (a parse failure leaves the previous drawing in place), so the main process doesn't keep a second copy of this state. `index.html`'s `<title>` is ignored (`page-title-updated` is prevented).
+The renderer's save controller is the single source of truth: whenever the current file, dirty flag or content changes (startup load, ⌘N, ⌘O, Save As, Finder / Open Recent, edits) it sends one `set-document-state` report, and the main process updates the title, the represented filename and the edited dot from it. The renderer is the only side that knows a file actually loaded (a parse failure leaves the previous drawing in place), so the main process doesn't keep a second copy of this state. `index.html`'s `<title>` is ignored (`page-title-updated` is prevented).
 
 ### Open Recent
 

@@ -6,12 +6,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const require = createRequire(import.meta.url);
-const {
-  isAllowedPath,
-  readConfig,
-  readDrawing,
-  writeDrawing,
-} = require("./fileService");
+const { isAllowedPath, readConfig, readDrawing, writeDrawing } = require("./fileService");
 
 let tmpDir;
 

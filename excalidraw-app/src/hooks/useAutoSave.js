@@ -8,8 +8,10 @@ const useAutoSave = ({ config, getSerializedScene }) => {
     createSaveController({
       writeFile: (filePath, content) => window.electronAPI.writeFile(filePath, content),
       saveFileDialog: (content) => window.electronAPI.saveFileDialog(content),
-      onStateChange: ({ dirty, hasFilePath, hasContent }) => {
-        window.electronAPI.setDocumentState({ dirty, hasFilePath, hasContent });
+      // { filePath, hasFilePath, dirty, hasContent }: main derives the window title,
+      // proxy icon, edited dot and "Save changes?" prompt from this one report
+      onStateChange: (state) => {
+        window.electronAPI.setDocumentState(state);
       },
     }),
   );

@@ -9,7 +9,7 @@ const { buildMenuTemplate } = require("./electron/menu");
 const {
   createCurrentFileRecorder,
   createOpenFileHandler,
-  createSetCurrentFileHandler,
+  applyReportedFile,
   isReadableFile,
 } = require("./electron/document");
 const { backgroundColorFor, createThemeController } = require("./electron/theme");
@@ -102,17 +102,13 @@ const registerIpcHandlers = () => {
     return filePath;
   });
 
-  // renderer's currentFilePath is the single source of truth for the window title + proxy icon
-  ipcMain.on(
-    "set-current-file",
-    createSetCurrentFileHandler({
-      isAllowedPath,
-      getWindowFromWebContents: (webContents) => BrowserWindow.fromWebContents(webContents),
-    }),
-  );
-
-  // renderer → main: dirty / untitled / empty state of the current drawing
+  // one report from the renderer covers the window title + proxy icon and the
+  // dirty / untitled / empty state used for the edited dot and "Save changes?" prompt
   ipcMain.on("set-document-state", (event, state) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win && state && typeof state === "object" && "filePath" in state) {
+      applyReportedFile(win, state.filePath, isAllowedPath);
+    }
     sessionFor(event.sender)?.setDocumentState(state);
   });
 

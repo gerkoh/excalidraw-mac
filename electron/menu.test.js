@@ -4,7 +4,7 @@ import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 const { buildMenuTemplate } = require("./menu");
 
-const createFakeWindow = () => ({ webContents: { send: vi.fn() } });
+const createFakeWindow = () => ({ webContents: { send: vi.fn(), reload: vi.fn() } });
 
 const setup = ({
   focusedWindow = createFakeWindow(),
@@ -238,7 +238,6 @@ describe("buildMenuTemplate", () => {
     expect(roles(template[0])).toEqual(["about", "hide", "hideOthers", "unhide", "quit"]);
     expect(roles(findMenu("Edit"))).toEqual(["undo", "redo", "cut", "copy", "paste", "selectAll"]);
     expect(roles(findMenu("View"))).toEqual([
-      "reload",
       "toggleDevTools",
       "zoomIn",
       "zoomOut",
@@ -246,6 +245,29 @@ describe("buildMenuTemplate", () => {
       "togglefullscreen",
     ]);
     expect(roles(findMenu("Window"))).toEqual(["minimize", "zoom", "close"]);
+  });
+
+  describe("View -> Reload", () => {
+    it("asks about unsaved changes and reloads only when the user agrees", async () => {
+      const { findViewItem, confirmReplaceDocument, focusedWindow } = setup();
+      const reload = findViewItem("Reload");
+      expect(reload.accelerator).toBe("CmdOrCtrl+R");
+
+      confirmReplaceDocument.mockResolvedValueOnce(false);
+      await reload.click();
+      expect(confirmReplaceDocument).toHaveBeenCalledWith(focusedWindow);
+      expect(focusedWindow.webContents.reload).not.toHaveBeenCalled();
+
+      confirmReplaceDocument.mockResolvedValueOnce(true);
+      await reload.click();
+      expect(focusedWindow.webContents.reload).toHaveBeenCalledTimes(1);
+    });
+
+    it("does nothing when no window is focused", async () => {
+      const { findViewItem, confirmReplaceDocument } = setup({ focusedWindow: null });
+      await findViewItem("Reload").click();
+      expect(confirmReplaceDocument).not.toHaveBeenCalled();
+    });
   });
 
   describe("File -> Open Recent", () => {

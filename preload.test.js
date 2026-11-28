@@ -65,7 +65,6 @@ describe("preload", () => {
         "onMenuSave",
         "onMenuSaveAs",
         "onOpenFile",
-        "setCurrentFile",
         "getTheme",
         "setThemePreference",
         "onThemeChanged",
@@ -139,8 +138,6 @@ describe("preload", () => {
 
   describe("send methods", () => {
     it.each([
-      ["setCurrentFile", ["/a.excalidraw"], ["set-current-file", "/a.excalidraw"]],
-      ["setCurrentFile", [null], ["set-current-file", null]],
       ["setThemePreference", ["dark"], ["set-theme-preference", "dark"]],
       ["setThemePreference", ["system"], ["set-theme-preference", "system"]],
     ])("%s(%j) sends (not invokes) the right channel", (method, args, expected) => {
@@ -149,12 +146,6 @@ describe("preload", () => {
       expect(ipcRenderer.send).toHaveBeenCalledTimes(1);
       expect(ipcRenderer.send).toHaveBeenCalledWith(...expected);
       expect(ipcRenderer.invoke).not.toHaveBeenCalled();
-    });
-
-    it("setCurrentFile forwards exactly one argument", () => {
-      loadPreload();
-      api.setCurrentFile("/a.excalidraw", "extra");
-      expect(ipcRenderer.send).toHaveBeenCalledWith("set-current-file", "/a.excalidraw");
     });
   });
 

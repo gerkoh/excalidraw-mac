@@ -34,9 +34,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // OS open-file event (double-click / Open With)
   onOpenFile: subscribe("open-file"),
 
-  // Current file (null = untitled): main updates the window title + proxy icon
-  setCurrentFile: (filePath) => ipcRenderer.send("set-current-file", filePath),
-
   // Theme: effective "light" | "dark" (View -> Appearance preference resolved against macOS)
   getTheme: () => ipcRenderer.invoke("get-theme"),
   setThemePreference: (preference) => ipcRenderer.send("set-theme-preference", preference),

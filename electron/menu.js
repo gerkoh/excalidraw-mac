@@ -85,7 +85,16 @@ const buildMenuTemplate = ({
     {
       label: "View",
       submenu: [
-        { role: "reload" },
+        {
+          label: "Reload",
+          accelerator: "CmdOrCtrl+R",
+          click: async () => {
+            const win = getFocusedWindow();
+            // reloading throws away renderer state, so an untitled drawing gets the same prompt as ⌘N
+            if (!win || !(await confirmReplaceDocument(win))) return;
+            win.webContents.reload();
+          },
+        },
         { role: "toggleDevTools" },
         { type: "separator" },
         { role: "zoomIn" },

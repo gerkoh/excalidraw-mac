@@ -108,10 +108,11 @@ describe("useAutoSave", () => {
     expect(window.electronAPI.saveFileDialog).toHaveBeenCalledWith("scene");
   });
 
-  it("reports dirty / hasFilePath / hasContent to main (and nothing else)", async () => {
+  it("reports file path, dirty, hasFilePath and hasContent to main (and nothing else)", async () => {
     const { result } = renderAutoSave();
     openAndEdit(result.current);
     expect(window.electronAPI.setDocumentState).toHaveBeenLastCalledWith({
+      filePath: PATH,
       dirty: true,
       hasFilePath: true,
       hasContent: true,
@@ -119,16 +120,18 @@ describe("useAutoSave", () => {
 
     await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
     expect(window.electronAPI.setDocumentState).toHaveBeenLastCalledWith({
+      filePath: PATH,
       dirty: false,
       hasFilePath: true,
       hasContent: true,
     });
   });
 
-  it("reports untitled edits as dirty without a file path", () => {
+  it("reports untitled edits as dirty with a null file path", () => {
     const { result } = renderAutoSave();
     openAndEdit(result.current, null);
     expect(window.electronAPI.setDocumentState).toHaveBeenLastCalledWith({
+      filePath: null,
       dirty: true,
       hasFilePath: false,
       hasContent: true,

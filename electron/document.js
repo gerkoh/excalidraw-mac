@@ -23,18 +23,16 @@ const applyCurrentFileToWindow = (win, filePath) => {
   }
 };
 
-// IPC "set-current-file": the renderer reports its currentFilePath (null = untitled) whenever it changes
-const createSetCurrentFileHandler = ({ isAllowedPath, getWindowFromWebContents }) => {
-  return (event, filePath) => {
-    if (filePath !== null && !isAllowedPath(filePath)) {
-      console.error("[main] Rejected set-current-file for disallowed path:", filePath);
-      return false;
-    }
-    const win = getWindowFromWebContents(event.sender);
-    if (!win) return false;
-    applyCurrentFileToWindow(win, filePath);
-    return true;
-  };
+// the file path carried by a "set-document-state" report (null = untitled).
+// a disallowed path is rejected and the window is left untouched
+const applyReportedFile = (win, filePath, isAllowedPath) => {
+  if (!win) return false;
+  if (filePath !== null && !isAllowedPath(filePath)) {
+    console.error("[main] Rejected document state for disallowed path:", filePath);
+    return false;
+  }
+  applyCurrentFileToWindow(win, filePath);
+  return true;
 };
 
 // --- "File became current" bookkeeping ---
@@ -136,7 +134,7 @@ module.exports = {
   UNTITLED,
   formatWindowTitle,
   applyCurrentFileToWindow,
-  createSetCurrentFileHandler,
+  applyReportedFile,
   createCurrentFileRecorder,
   isReadableFile,
   missingFileError,
