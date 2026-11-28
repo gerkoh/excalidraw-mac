@@ -1,0 +1,171 @@
+/* Brave's tab strip: the row is the window chrome and tabs sit on its bottom
+   edge. The active tab stays dark in both themes, whatever color the canvas is. */
+
+.drawing-tabs {
+  display: flex;
+  align-items: flex-end;
+  box-sizing: border-box;
+  padding-top: 6px;
+  padding-right: 6px;
+  gap: 0;
+  flex-shrink: 0;
+  overflow-x: auto;
+  user-select: none;
+  scrollbar-width: thin;
+}
+
+.drawing-tabs-dark {
+  background: #202124;
+  color: #e8eaed;
+}
+
+.drawing-tabs-light {
+  background: #dee1e6;
+  color: #202124;
+}
+
+.drawing-tab {
+  -webkit-app-region: no-drag;
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 240px;
+  max-width: 240px;
+  min-width: 48px;
+  height: 34px;
+  border-radius: 8px 8px 0 0;
+}
+
+.drawing-tabs-dark .drawing-tab {
+  color: #9aa0a6;
+}
+
+.drawing-tabs-light .drawing-tab {
+  color: #5f6368;
+}
+
+.drawing-tab[data-active="true"] {
+  background: #121212;
+  color: #e8eaed;
+}
+
+.drawing-tabs-dark .drawing-tab:not([data-active="true"]):hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e8eaed;
+}
+
+.drawing-tabs-light .drawing-tab:not([data-active="true"]):hover {
+  background: rgba(255, 255, 255, 0.7);
+  color: #202124;
+}
+
+/* Hairline between inactive tabs, hidden beside the active or hovered one. */
+.drawing-tab + .drawing-tab::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 9px;
+  width: 1px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.drawing-tabs-light .drawing-tab + .drawing-tab::before {
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.drawing-tab[data-active="true"]::before,
+.drawing-tab:hover::before,
+.drawing-tab[data-active="true"] + .drawing-tab::before,
+.drawing-tab:hover + .drawing-tab::before {
+  background: transparent;
+}
+
+.drawing-tab-main {
+  -webkit-app-region: no-drag;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font:
+    12px -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+  text-align: left;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.drawing-tab-label {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drawing-tab-close {
+  -webkit-app-region: no-drag;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font:
+    13px/16px -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.drawing-tab[data-active="true"] .drawing-tab-close,
+.drawing-tab:hover .drawing-tab-close,
+.drawing-tab:focus-within .drawing-tab-close {
+  opacity: 1;
+}
+
+.drawing-tabs-dark .drawing-tab-close:hover,
+.drawing-tab[data-active="true"] .drawing-tab-close:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.drawing-tabs-light .drawing-tab-close:hover {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.drawing-tab-new {
+  -webkit-app-region: no-drag;
+  align-self: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin: 0 2px 3px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font:
+    18px/28px -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+  cursor: pointer;
+}
+
+.drawing-tabs-dark .drawing-tab-new:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.drawing-tabs-light .drawing-tab-new:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.drawing-tab-new:disabled {
+  opacity: 0.35;
+  cursor: default;
+}

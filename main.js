@@ -15,6 +15,8 @@ const {
 const { backgroundColorFor, createThemeController } = require("./electron/theme");
 const { attachNavigationGuard } = require("./electron/navigationGuard");
 const { createWindowSession } = require("./electron/windowSession");
+const { filterStoredTabs, normalizeStoredSession } = require("./electron/tabSession");
+const { windowChromeOptions } = require("./electron/windowChrome");
 const { getLibraryPath } = require("./electron/libraryStore");
 const { registerLibraryIpcHandlers } = require("./electron/libraryIpc");
 const {
@@ -43,6 +45,10 @@ const appUrl = pathToFileURL(indexPath).href;
 
 const sessions = new Map();
 let isQuitting = false;
+// per-window launch flags (blank tab, or blank tab plus the open dialog). Consumed by get-open-tabs.
+const windowStartup = new WeakMap();
+// rebuilt when the tab count changes, so New / New Tab disable at the cap
+let lastMenuTabCount;
 
 const sessionFor = (webContents) => sessions.get(webContents.id);
 
@@ -109,14 +115,48 @@ const registerIpcHandlers = () => {
     return filePath;
   });
 
-  // one report from the renderer covers the window title + proxy icon and the
-  // dirty / untitled / empty state used for the edited dot and "Save changes?" prompt
+  // one report from the renderer covers every tab: the active one drives the title and
+  // proxy icon, and any dirty tab lights the edited dot
   ipcMain.on("set-document-state", (event, state) => {
     const win = BrowserWindow.fromWebContents(event.sender);
-    if (win && state && typeof state === "object" && "filePath" in state) {
-      applyReportedFile(win, state.filePath, isAllowedPath);
+    const session = sessionFor(event.sender);
+    if (!session) return;
+    session.setDocumentState(state);
+    if (win) applyReportedFile(win, session.getActiveFilePath(), isAllowedPath);
+    syncMenu();
+  });
+
+  ipcMain.handle("get-open-tabs", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const startup = (win && windowStartup.get(win)) || { blank: false, openDialog: false };
+    if (win) windowStartup.delete(win);
+    if (startup.blank) {
+      return { blank: true, openDialog: startup.openDialog === true, tabs: [], activeIndex: 0 };
     }
-    sessionFor(event.sender)?.setDocumentState(state);
+    return { blank: false, openDialog: false, ...readOpenTabs() };
+  });
+
+  ipcMain.handle("confirm-close-tab", async (event, tabId) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const session = sessionFor(event.sender);
+    if (!win || !session) return "cancel";
+    const result = await session.confirmCloseTab(tabId);
+    if (result === "window") {
+      win.close();
+      return "window";
+    }
+    return result ? "remove" : "cancel";
+  });
+
+  ipcMain.handle("confirm-replace-active", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return false;
+    return confirmReplaceDocument(win);
+  });
+
+  ipcMain.on("close-window", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win && !win.isDestroyed()) win.close();
   });
 
   ipcMain.on("save-as-result", (event, saved) => {
@@ -145,7 +185,47 @@ const registerIpcHandlers = () => {
 // read once at startup; createWindow stays synchronous so `activate` can't race into two windows
 let windowConfig = null;
 
-const createWindow = () => {
+// openTabs is written on quit and window close. A build from before tabs only has lastOpenedPath.
+const readOpenTabs = () => {
+  const stored = store.get("openTabs");
+  if (stored == null) {
+    const last = store.get("lastOpenedPath");
+    if (typeof last === "string" && isAllowedPath(last) && isReadableFile(last)) {
+      return { tabs: [{ filePath: last }], activeIndex: 0 };
+    }
+    return { tabs: [], activeIndex: 0 };
+  }
+  return filterStoredTabs(normalizeStoredSession(stored), (tab) => {
+    if (!isAllowedPath(tab.filePath) || !isReadableFile(tab.filePath)) {
+      console.error("[main] Dropping a restored tab that can't be opened:", tab.filePath);
+      return false;
+    }
+    return true;
+  });
+};
+
+const persistOpenTabs = (snapshot) => {
+  const checked = filterStoredTabs(snapshot, (tab) => isAllowedPath(tab.filePath));
+  store.set("openTabs", checked);
+  const active = checked.tabs[checked.activeIndex] ?? null;
+  store.set("lastOpenedPath", active ? active.filePath : null);
+  for (const tab of checked.tabs) app.addRecentDocument(tab.filePath);
+};
+
+const currentTabCount = () => {
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null;
+  if (!win) return null;
+  const session = sessionFor(win.webContents);
+  return session ? session.getTabCount() : null;
+};
+
+const syncMenu = () => {
+  const count = currentTabCount();
+  if (count === lastMenuTabCount) return;
+  buildMenu();
+};
+
+const createWindow = ({ blank = false, openDialog = false } = {}) => {
   const win = new BrowserWindow({
     width: windowConfig?.windowWidth ?? 1512,
     height: windowConfig?.windowHeight ?? 982,
@@ -154,6 +234,9 @@ const createWindow = () => {
     title: app.name,
     // paint the effective theme's background before the renderer loads (no white flash in dark mode)
     backgroundColor: backgroundColorFor(theme.getEffectiveTheme()),
+    // The renderer draws the tabs in the title-bar row. hiddenInset keeps the
+    // traffic lights and drops the centered window title, which would repeat the tab.
+    ...windowChromeOptions(),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
     },
@@ -161,6 +244,13 @@ const createWindow = () => {
 
   // the title tracks the current file, so ignore index.html's <title>
   win.on("page-title-updated", (e) => e.preventDefault());
+
+  // Full screen hides the traffic lights, so the tab strip drops its left inset.
+  const sendChrome = (fullScreen) => {
+    if (!win.isDestroyed()) win.webContents.send("window-chrome", { fullScreen });
+  };
+  win.on("enter-full-screen", () => sendChrome(true));
+  win.on("leave-full-screen", () => sendChrome(false));
 
   // the id is unavailable once the window is destroyed, so capture it for cleanup
   const webContentsId = win.webContents.id;
@@ -172,14 +262,18 @@ const createWindow = () => {
       isQuitting = false;
     },
     quit: () => app.quit(),
+    persistOpenTabs,
   });
   sessions.set(webContentsId, session);
 
   win.on("close", (event) => {
     session.handleClose(event);
   });
+  windowStartup.set(win, { blank, openDialog });
+
   win.on("closed", () => {
     sessions.delete(webContentsId);
+    syncMenu();
   });
   win.webContents.on("render-process-gone", () => session.handleRendererGone());
 
@@ -195,11 +289,16 @@ const createWindow = () => {
 // --- Application Menu ---
 
 const buildMenu = () => {
+  lastMenuTabCount = currentTabCount();
   const template = buildMenuTemplate({
     appName: app.name,
     getFocusedWindow: () => BrowserWindow.getFocusedWindow(),
-    clearLastOpenedPath: () => store.set("lastOpenedPath", null),
-    confirmReplaceDocument,
+    getOpenTabCount: () => currentTabCount(),
+    createWindow: (options) => createWindow(options),
+    prepareToDiscardContents: async (win) => {
+      const session = sessionFor(win.webContents);
+      return session ? session.prepareToDiscardContents() : true;
+    },
     themePreference: theme.getPreference(),
     setThemePreference: (preference) => theme.setPreference(preference),
   });
@@ -220,6 +319,14 @@ const handleOpenFile = createOpenFileHandler({
   isStoreReady: () => store != null,
   recordCurrentFile: (filePath) => recordCurrentFile(filePath),
   getWindow: () => BrowserWindow.getAllWindows()[0] ?? null,
+  describeWindow: (win) => {
+    const session = sessionFor(win.webContents);
+    if (!session) return { tabCount: 0, hasPath: () => false };
+    return {
+      tabCount: session.getTabCount(),
+      hasPath: (filePath) => session.hasPath(filePath),
+    };
+  },
   confirmReplaceDocument,
   isAppReady: () => app.isReady(),
   setPendingFile: (filePath) => {

@@ -605,3 +605,211 @@ describe("per-window isolation", () => {
     expect(nextWin.closed).toBe(true);
   });
 });
+
+const savedTab = (id, filePath, overrides = {}) => ({
+  id,
+  filePath,
+  dirty: false,
+  hasFilePath: true,
+  hasContent: true,
+  ...overrides,
+});
+
+const unsavedTab = (id) => ({
+  id,
+  filePath: null,
+  dirty: true,
+  hasFilePath: false,
+  hasContent: true,
+});
+
+describe("several tabs", () => {
+  const twoUnsaved = () => ({
+    activeTabId: "a",
+    tabs: [unsavedTab("a"), unsavedTab("b")],
+  });
+
+  // the renderer shows the tab main asked for before the sheet
+  const activateOnRequest = () => {
+    win.webContents.send.mockImplementation((channel, tabId) => {
+      if (channel !== "activate-tab") return;
+      const current = session.getSessionState();
+      session.setDocumentState({ ...current, activeTabId: tabId });
+    });
+  };
+
+  it("sets the edited dot when any tab is dirty, and reports the active tab as the document", () => {
+    session.setDocumentState({
+      activeTabId: "a",
+      tabs: [savedTab("a", "/a.excalidraw"), unsavedTab("b")],
+    });
+    expect(win.setDocumentEdited).toHaveBeenLastCalledWith(true);
+    expect(session.getDocumentState()).toEqual({
+      dirty: false,
+      hasFilePath: true,
+      hasContent: true,
+    });
+    expect(session.getActiveFilePath()).toBe("/a.excalidraw");
+    expect(session.getTabCount()).toBe(2);
+    expect(session.hasPath("/a.excalidraw")).toBe(true);
+    expect(session.hasPath("/missing.excalidraw")).toBe(false);
+  });
+
+  it("asks about every dirty untitled tab, showing that tab first", async () => {
+    activateOnRequest();
+    session.setDocumentState(twoUnsaved());
+    userChooses(DONT_SAVE);
+    const { flow } = requestClose();
+    await flushPromises();
+    expect(showMessageBox).toHaveBeenCalledTimes(2);
+    expect(sentChannels()).toEqual(["activate-tab", "before-close"]);
+    session.handleCloseAcknowledged();
+    await flow;
+    expect(win.closed).toBe(true);
+  });
+
+  it("stops on Cancel and leaves the later tabs unasked", async () => {
+    activateOnRequest();
+    session.setDocumentState(twoUnsaved());
+    userChooses(CANCEL);
+    await requestClose().flow;
+    expect(showMessageBox).toHaveBeenCalledTimes(1);
+    expect(win.close).not.toHaveBeenCalled();
+    expect(sentChannels()).not.toContain("before-close");
+  });
+
+  it("runs Save As for the tab that needs it", async () => {
+    activateOnRequest();
+    session.setDocumentState(twoUnsaved());
+    showMessageBox
+      .mockResolvedValueOnce({ response: DONT_SAVE })
+      .mockResolvedValueOnce({ response: SAVE });
+    const { flow } = requestClose();
+    await flushPromises();
+    expect(win.webContents.send).toHaveBeenCalledWith("save-as-request", "b");
+    session.handleSaveAsResult(false);
+    await flow;
+    expect(win.close).not.toHaveBeenCalled();
+  });
+
+  describe("what gets written", () => {
+    let persistOpenTabs;
+
+    beforeEach(() => {
+      persistOpenTabs = vi.fn();
+      session = createWindowSession({
+        win,
+        showMessageBox,
+        isQuitting: () => quitting,
+        onCloseCancelled,
+        quit,
+        persistOpenTabs,
+      });
+      win.closeHandler = (event) => session.handleClose(event);
+    });
+
+    const finishClose = async () => {
+      const { flow } = requestClose();
+      await flushPromises();
+      session.handleCloseAcknowledged();
+      await flow;
+    };
+
+    it("on quit before the renderer has reported, leaves the stored session alone", async () => {
+      quitting = true;
+      await finishClose();
+      expect(persistOpenTabs).not.toHaveBeenCalled();
+    });
+
+    it("on quit, stores every saved tab and drops the untitled one", async () => {
+      activateOnRequest();
+      quitting = true;
+      session.setDocumentState({
+        activeTabId: "b",
+        tabs: [savedTab("a", "/a.excalidraw"), savedTab("b", "/b.excalidraw"), unsavedTab("c")],
+      });
+      userChooses(DONT_SAVE);
+      await finishClose();
+      expect(persistOpenTabs).toHaveBeenCalledTimes(1);
+      expect(persistOpenTabs).toHaveBeenCalledWith({
+        tabs: [{ filePath: "/a.excalidraw" }, { filePath: "/b.excalidraw" }],
+        activeIndex: 1,
+      });
+    });
+
+    it("on quit with nothing saved, stores an empty session", async () => {
+      quitting = true;
+      session.setDocumentState({ activeTabId: "a", tabs: [unsavedTab("a")] });
+      userChooses(DONT_SAVE);
+      await finishClose();
+      expect(persistOpenTabs).toHaveBeenCalledWith({ tabs: [], activeIndex: 0 });
+    });
+
+    it("on window close, stores only the active file", async () => {
+      session.setDocumentState({
+        activeTabId: "b",
+        tabs: [savedTab("a", "/a.excalidraw"), savedTab("b", "/b.excalidraw")],
+      });
+      await finishClose();
+      expect(persistOpenTabs).toHaveBeenCalledWith({
+        tabs: [{ filePath: "/b.excalidraw" }],
+        activeIndex: 0,
+      });
+    });
+
+    it("on window close of a blank tab, does not touch the stored session", async () => {
+      session.setDocumentState({
+        activeTabId: "b",
+        tabs: [savedTab("a", "/a.excalidraw"), unsavedTab("b")],
+      });
+      userChooses(DONT_SAVE);
+      await finishClose();
+      expect(persistOpenTabs).not.toHaveBeenCalled();
+    });
+  });
+
+  it("close-tab on the last tab tells the caller to close the window instead", async () => {
+    session.setDocumentState({ activeTabId: "a", tabs: [unsavedTab("a")] });
+    expect(await session.confirmCloseTab("a")).toBe("window");
+    expect(showMessageBox).not.toHaveBeenCalled();
+  });
+
+  it("close-tab asks only about that tab, then allows removing it", async () => {
+    activateOnRequest();
+    session.setDocumentState(twoUnsaved());
+    userChooses(DONT_SAVE);
+    expect(await session.confirmCloseTab("b")).toBe(true);
+    expect(showMessageBox).toHaveBeenCalledTimes(1);
+    expect(sentChannels()).toEqual(["activate-tab"]);
+  });
+
+  it("close-tab Cancel keeps the tab", async () => {
+    session.setDocumentState(twoUnsaved());
+    userChooses(CANCEL);
+    expect(await session.confirmCloseTab("a")).toBe(false);
+  });
+
+  it("reload asks about every dirty untitled tab and stores the full set", async () => {
+    const persistOpenTabs = vi.fn();
+    session = createWindowSession({
+      win,
+      showMessageBox,
+      isQuitting: () => false,
+      onCloseCancelled,
+      quit,
+      persistOpenTabs,
+    });
+    session.setDocumentState({
+      activeTabId: "a",
+      tabs: [savedTab("a", "/a.excalidraw"), savedTab("b", "/b.excalidraw")],
+    });
+    const prepared = session.prepareToDiscardContents();
+    await flushPromises();
+    session.handleCloseAcknowledged();
+    expect(await prepared).toBe(true);
+    expect(persistOpenTabs).toHaveBeenCalledWith({
+      tabs: [{ filePath: "/a.excalidraw" }, { filePath: "/b.excalidraw" }],
+      activeIndex: 0,
+    });
+  });
+});

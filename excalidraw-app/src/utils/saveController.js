@@ -32,8 +32,15 @@ const createSaveController = ({ writeFile, saveFileDialog, onStateChange }) => {
   let inFlight = null;
   let saveRequestedDuringFlight = false;
   let lastReported = null;
+  let reporter = onStateChange;
 
   const getState = () => ({ filePath, hasFilePath: filePath !== null, dirty, hasContent });
+
+  // the owner can retarget reports (one tab's state joins the window session) without
+  // rebuilding the controller, which would drop an in-flight save
+  const setReporter = (next) => {
+    reporter = next;
+  };
 
   const notify = () => {
     const state = getState();
@@ -44,7 +51,7 @@ const createSaveController = ({ writeFile, saveFileDialog, onStateChange }) => {
       lastReported.hasContent === state.hasContent;
     if (unchanged) return;
     lastReported = state;
-    onStateChange(state);
+    reporter(state);
   };
 
   const cancelDebounce = () => {
@@ -173,6 +180,7 @@ const createSaveController = ({ writeFile, saveFileDialog, onStateChange }) => {
 
   return {
     getState,
+    setReporter,
     setDebounceMs,
     setSerializer,
     startDocument,

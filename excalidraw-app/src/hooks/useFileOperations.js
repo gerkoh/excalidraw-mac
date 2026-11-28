@@ -2,8 +2,19 @@ import { useState, useEffect } from "react";
 import { parseInitialData, loadScene } from "../utils/sceneUtils";
 
 // saver is the save controller from useAutoSave; it owns the current file path and dirty state,
-// and saver.save() is the one way this hook writes the current file
-const useFileOperations = ({ excalidrawAPI, sceneElementsRef, appStateRef, saver }) => {
+// and saver.save() is the one way this hook writes the current file.
+// startupPath: undefined looks up the OS pending file / last path (single-document callers);
+// null is a blank tab; a string loads that file. subscribeToMenu is false when the shell
+// owns the menu, so several tabs don't each answer the same shortcut.
+const useFileOperations = ({
+  excalidrawAPI,
+  sceneElementsRef,
+  appStateRef,
+  saver,
+  startupPath,
+  subscribeToMenu = true,
+  onReady,
+}) => {
   // on first render: Don't render Excalidraw until we know whether there's saved data
   const [initialData, setInitialData] = useState(undefined);
 
@@ -17,10 +28,13 @@ const useFileOperations = ({ excalidrawAPI, sceneElementsRef, appStateRef, saver
 
     const loadInitialData = async () => {
       try {
-        // check if a file was requested via OS (double-click / Open With)
-        const pendingPath = await window.electronAPI.getPendingFile();
-        // use the pending file if available, otherwise fall back to last opened
-        const targetPath = pendingPath || (await window.electronAPI.getLastPath());
+        let targetPath = startupPath;
+        if (targetPath === undefined) {
+          // check if a file was requested via OS (double-click / Open With)
+          const pendingPath = await window.electronAPI.getPendingFile();
+          // use the pending file if available, otherwise fall back to last opened
+          targetPath = pendingPath || (await window.electronAPI.getLastPath());
+        }
 
         if (targetPath) {
           const content = await window.electronAPI.readFile(targetPath);
@@ -45,10 +59,10 @@ const useFileOperations = ({ excalidrawAPI, sceneElementsRef, appStateRef, saver
       }
     };
     loadInitialData();
-  }, [saver]);
+  }, [saver, startupPath]);
 
   useEffect(() => {
-    if (!excalidrawAPI) return;
+    if (!excalidrawAPI) return undefined;
 
     // parse file content and swap it into the canvas; returns false if content is malformed.
     // startDocument first so the load itself isn't seen as an edit
@@ -136,6 +150,14 @@ const useFileOperations = ({ excalidrawAPI, sceneElementsRef, appStateRef, saver
       }
     };
 
+    const actions = {
+      save: () => saver.save(),
+      saveAs: () => saver.saveAs(),
+      getState: () => saver.getState(),
+    };
+    onReady?.(actions);
+    if (!subscribeToMenu) return () => onReady?.(null);
+
     const unsubs = [
       window.electronAPI.onMenuNew(handleNew),
       window.electronAPI.onMenuOpen(handleOpen),
@@ -146,9 +168,13 @@ const useFileOperations = ({ excalidrawAPI, sceneElementsRef, appStateRef, saver
       window.electronAPI.onBeforeClose(handleBeforeClose),
     ];
 
-    return () => unsubs.forEach((unsub) => unsub());
+    return () => {
+      unsubs.forEach((unsub) => unsub());
+      onReady?.(null);
+    };
+    // handlers close over the latest saver; the menu subscription itself is per canvas
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [excalidrawAPI, saver]);
+  }, [excalidrawAPI, saver, subscribeToMenu, onReady]);
 
   return { initialData };
 };

@@ -4,22 +4,28 @@ import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 const { buildMenuTemplate } = require("./menu");
 
-const createFakeWindow = () => ({ webContents: { send: vi.fn(), reload: vi.fn() } });
+const createFakeWindow = () => ({
+  webContents: { send: vi.fn(), reload: vi.fn() },
+  close: vi.fn(),
+});
 
 const setup = ({
   focusedWindow = createFakeWindow(),
   themePreference = "system",
-  mayReplace = true,
+  mayDiscard = true,
+  tabCount = focusedWindow ? 1 : null,
 } = {}) => {
   const getFocusedWindow = vi.fn(() => focusedWindow);
-  const clearLastOpenedPath = vi.fn();
+  const getOpenTabCount = vi.fn(() => tabCount);
+  const createWindow = vi.fn();
   const setThemePreference = vi.fn();
-  const confirmReplaceDocument = vi.fn(() => Promise.resolve(mayReplace));
+  const prepareToDiscardContents = vi.fn(() => Promise.resolve(mayDiscard));
   const template = buildMenuTemplate({
     appName: "excalidraw-mac",
     getFocusedWindow,
-    clearLastOpenedPath,
-    confirmReplaceDocument,
+    getOpenTabCount,
+    createWindow,
+    prepareToDiscardContents,
     themePreference,
     setThemePreference,
   });
@@ -30,8 +36,9 @@ const setup = ({
     template,
     focusedWindow,
     getFocusedWindow,
-    clearLastOpenedPath,
-    confirmReplaceDocument,
+    getOpenTabCount,
+    createWindow,
+    prepareToDiscardContents,
     setThemePreference,
     findMenu,
     findFileItem,
@@ -55,42 +62,39 @@ describe("buildMenuTemplate", () => {
     const template = buildMenuTemplate({
       appName: "Other Name",
       getFocusedWindow: () => null,
-      clearLastOpenedPath: () => {},
-      confirmReplaceDocument: () => Promise.resolve(true),
     });
     expect(template[0].label).toBe("Other Name");
   });
 
-  it("does not touch the window or store while building", () => {
-    const {
-      getFocusedWindow,
-      clearLastOpenedPath,
-      confirmReplaceDocument,
-      setThemePreference,
-      focusedWindow,
-    } = setup();
+  it("does not touch the window while building", () => {
+    const { getFocusedWindow, setThemePreference, focusedWindow, createWindow } = setup();
     expect(getFocusedWindow).not.toHaveBeenCalled();
-    expect(clearLastOpenedPath).not.toHaveBeenCalled();
     expect(setThemePreference).not.toHaveBeenCalled();
-    expect(confirmReplaceDocument).not.toHaveBeenCalled();
+    expect(createWindow).not.toHaveBeenCalled();
     expect(focusedWindow.webContents.send).not.toHaveBeenCalled();
+    expect(focusedWindow.close).not.toHaveBeenCalled();
   });
 
-  it("has New, separator, Open…, Open Recent, separator, Save, Save As… in the File menu", () => {
+  it("has New, New Tab, Open…, Save, Close Tab and Close Window in the File menu", () => {
     const { findMenu } = setup();
     expect(findMenu("File").submenu.map((item) => item.label ?? item.type)).toEqual([
       "New",
+      "New Tab",
       "separator",
       "Open…",
       "Open Recent",
       "separator",
       "Save",
       "Save As…",
+      "separator",
+      "Close Tab",
+      "Close Window",
     ]);
   });
 
   it.each([
-    ["New", "Cmd+N", "menu-new"],
+    ["New", "Cmd+N", "menu-new-tab"],
+    ["New Tab", "Cmd+T", "menu-new-tab"],
     ["Open…", "Cmd+O", "menu-open"],
     ["Save", "Cmd+S", "menu-save"],
     ["Save As…", "Cmd+Shift+S", "menu-save-as"],
@@ -108,41 +112,64 @@ describe("buildMenuTemplate", () => {
     },
   );
 
-  it.each(["New", "Open…", "Save", "Save As…"])(
-    "%s does nothing to windows when none is focused",
+  it.each(["Save", "Save As…", "Close Tab", "Close Window"])(
+    "%s does nothing when no window is focused",
     async (label) => {
-      const { findFileItem, getFocusedWindow, confirmReplaceDocument } = setup({
-        focusedWindow: null,
-      });
+      const { findFileItem, getFocusedWindow, createWindow } = setup({ focusedWindow: null });
       await expect(Promise.resolve(findFileItem(label).click())).resolves.toBeUndefined();
       expect(getFocusedWindow).toHaveBeenCalledTimes(1);
-      expect(confirmReplaceDocument).not.toHaveBeenCalled();
+      expect(createWindow).not.toHaveBeenCalled();
     },
   );
 
-  it("New clears the last opened path before notifying the window", async () => {
-    const { findFileItem, clearLastOpenedPath, focusedWindow } = setup();
-    await findFileItem("New").click();
-    expect(clearLastOpenedPath).toHaveBeenCalledTimes(1);
-    expect(clearLastOpenedPath.mock.invocationCallOrder[0]).toBeLessThan(
-      focusedWindow.webContents.send.mock.invocationCallOrder[0],
-    );
+  it.each(["New", "New Tab"])("%s opens a blank window when none is focused", async (label) => {
+    const { findFileItem, createWindow } = setup({ focusedWindow: null });
+    await findFileItem(label).click();
+    expect(createWindow).toHaveBeenCalledTimes(1);
+    expect(createWindow).toHaveBeenCalledWith({ blank: true });
   });
 
-  it("New clears the last opened path even when no window is focused", async () => {
-    const { findFileItem, clearLastOpenedPath } = setup({ focusedWindow: null });
-    await findFileItem("New").click();
-    expect(clearLastOpenedPath).toHaveBeenCalledTimes(1);
+  it("Open… opens a blank window and asks it to show the open dialog when none is focused", async () => {
+    const { findFileItem, createWindow } = setup({ focusedWindow: null });
+    await findFileItem("Open…").click();
+    expect(createWindow).toHaveBeenCalledWith({ blank: true, openDialog: true });
   });
 
-  it.each(["Open…", "Save", "Save As…"])(
-    "%s does not clear the last opened path",
+  it.each(["New", "New Tab"])(
+    "disables %s at the tab cap and the click does nothing",
     async (label) => {
-      const { findFileItem, clearLastOpenedPath } = setup();
-      await findFileItem(label).click();
-      expect(clearLastOpenedPath).not.toHaveBeenCalled();
+      const { findFileItem, focusedWindow } = setup({ tabCount: 8 });
+      const item = findFileItem(label);
+      expect(item.enabled).toBe(false);
+      await item.click();
+      expect(focusedWindow.webContents.send).not.toHaveBeenCalled();
     },
   );
+
+  it("Close Tab asks the renderer to close the active tab when others remain", async () => {
+    const { findFileItem, focusedWindow } = setup({ tabCount: 3 });
+    const item = findFileItem("Close Tab");
+    expect(item.accelerator).toBe("Cmd+W");
+    await item.click();
+    expect(focusedWindow.webContents.send).toHaveBeenCalledWith("menu-close-tab");
+    expect(focusedWindow.close).not.toHaveBeenCalled();
+  });
+
+  it("Close Tab closes the window when it is the last tab", async () => {
+    const { findFileItem, focusedWindow } = setup({ tabCount: 1 });
+    await findFileItem("Close Tab").click();
+    expect(focusedWindow.close).toHaveBeenCalledTimes(1);
+    expect(focusedWindow.webContents.send).not.toHaveBeenCalled();
+  });
+
+  it("Close Window closes the window even when several tabs are open", async () => {
+    const { findFileItem, focusedWindow } = setup({ tabCount: 4 });
+    const item = findFileItem("Close Window");
+    expect(item.accelerator).toBe("Cmd+Shift+W");
+    await item.click();
+    expect(focusedWindow.close).toHaveBeenCalledTimes(1);
+    expect(focusedWindow.webContents.send).not.toHaveBeenCalled();
+  });
 
   it("looks up the focused window at click time, not build time", () => {
     const first = createFakeWindow();
@@ -151,8 +178,7 @@ describe("buildMenuTemplate", () => {
     const template = buildMenuTemplate({
       appName: "excalidraw-mac",
       getFocusedWindow,
-      clearLastOpenedPath: () => {},
-      confirmReplaceDocument: () => Promise.resolve(true),
+      getOpenTabCount: () => 2,
     });
     const save = template[1].submenu.find((item) => item.label === "Save");
 
@@ -164,45 +190,15 @@ describe("buildMenuTemplate", () => {
   });
 
   describe("unsaved changes guard", () => {
-    it.each(["New", "Open…"])(
-      "%s asks to resolve unsaved changes of the focused window first",
+    it.each(["New", "New Tab", "Open…"])(
+      "%s does not ask about unsaved changes before adding a tab",
       async (label) => {
-        const { findFileItem, confirmReplaceDocument, focusedWindow } = setup();
+        const { findFileItem, focusedWindow, prepareToDiscardContents } = setup();
         await findFileItem(label).click();
-        expect(confirmReplaceDocument).toHaveBeenCalledTimes(1);
-        expect(confirmReplaceDocument).toHaveBeenCalledWith(focusedWindow);
-        expect(confirmReplaceDocument.mock.invocationCallOrder[0]).toBeLessThan(
-          focusedWindow.webContents.send.mock.invocationCallOrder[0],
-        );
+        expect(prepareToDiscardContents).not.toHaveBeenCalled();
+        expect(focusedWindow.webContents.send).toHaveBeenCalledTimes(1);
       },
     );
-
-    it.each(["New", "Open…"])("%s does nothing when the user cancels", async (label) => {
-      const { findFileItem, clearLastOpenedPath, focusedWindow } = setup({ mayReplace: false });
-      await findFileItem(label).click();
-      expect(focusedWindow.webContents.send).not.toHaveBeenCalled();
-      expect(clearLastOpenedPath).not.toHaveBeenCalled();
-    });
-
-    it("New does not clear the last opened path until the user has decided", async () => {
-      let decide;
-      const { findFileItem, clearLastOpenedPath, confirmReplaceDocument, focusedWindow } = setup();
-      confirmReplaceDocument.mockReturnValue(
-        new Promise((resolve) => {
-          decide = resolve;
-        }),
-      );
-
-      const clicking = findFileItem("New").click();
-      await Promise.resolve();
-      expect(clearLastOpenedPath).not.toHaveBeenCalled();
-      expect(focusedWindow.webContents.send).not.toHaveBeenCalled();
-
-      decide(true);
-      await clicking;
-      expect(clearLastOpenedPath).toHaveBeenCalledTimes(1);
-      expect(focusedWindow.webContents.send).toHaveBeenCalledWith("menu-new");
-    });
 
     it("sends to the window that was focused when clicked, even if focus moves meanwhile", async () => {
       const first = createFakeWindow();
@@ -211,8 +207,7 @@ describe("buildMenuTemplate", () => {
       const template = buildMenuTemplate({
         appName: "excalidraw-mac",
         getFocusedWindow,
-        clearLastOpenedPath: () => {},
-        confirmReplaceDocument: () => Promise.resolve(true),
+        getOpenTabCount: () => 1,
       });
       const open = template[1].submenu.find((item) => item.label === "Open…");
 
@@ -225,9 +220,9 @@ describe("buildMenuTemplate", () => {
     it.each(["Save", "Save As…"])(
       "%s never prompts (it doesn't replace the drawing)",
       async (label) => {
-        const { findFileItem, confirmReplaceDocument } = setup();
+        const { findFileItem, prepareToDiscardContents } = setup();
         await findFileItem(label).click();
-        expect(confirmReplaceDocument).not.toHaveBeenCalled();
+        expect(prepareToDiscardContents).not.toHaveBeenCalled();
       },
     );
   });
@@ -244,29 +239,29 @@ describe("buildMenuTemplate", () => {
       "resetZoom",
       "togglefullscreen",
     ]);
-    expect(roles(findMenu("Window"))).toEqual(["minimize", "zoom", "close"]);
+    expect(roles(findMenu("Window"))).toEqual(["minimize", "zoom"]);
   });
 
   describe("View -> Reload", () => {
     it("asks about unsaved changes and reloads only when the user agrees", async () => {
-      const { findViewItem, confirmReplaceDocument, focusedWindow } = setup();
+      const { findViewItem, prepareToDiscardContents, focusedWindow } = setup();
       const reload = findViewItem("Reload");
       expect(reload.accelerator).toBe("CmdOrCtrl+R");
 
-      confirmReplaceDocument.mockResolvedValueOnce(false);
+      prepareToDiscardContents.mockResolvedValueOnce(false);
       await reload.click();
-      expect(confirmReplaceDocument).toHaveBeenCalledWith(focusedWindow);
+      expect(prepareToDiscardContents).toHaveBeenCalledWith(focusedWindow);
       expect(focusedWindow.webContents.reload).not.toHaveBeenCalled();
 
-      confirmReplaceDocument.mockResolvedValueOnce(true);
+      prepareToDiscardContents.mockResolvedValueOnce(true);
       await reload.click();
       expect(focusedWindow.webContents.reload).toHaveBeenCalledTimes(1);
     });
 
     it("does nothing when no window is focused", async () => {
-      const { findViewItem, confirmReplaceDocument } = setup({ focusedWindow: null });
+      const { findViewItem, prepareToDiscardContents } = setup({ focusedWindow: null });
       await findViewItem("Reload").click();
-      expect(confirmReplaceDocument).not.toHaveBeenCalled();
+      expect(prepareToDiscardContents).not.toHaveBeenCalled();
     });
   });
 

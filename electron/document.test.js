@@ -253,6 +253,8 @@ describe("createOpenFileHandler", () => {
     appReady = true,
     win = createFakeWindow(),
     mayReplace = true,
+    tabCount = 1,
+    alreadyOpen = false,
   } = {}) => {
     const deps = {
       isAllowedPath,
@@ -261,6 +263,7 @@ describe("createOpenFileHandler", () => {
       isStoreReady: vi.fn(() => storeReady),
       recordCurrentFile: vi.fn(),
       getWindow: vi.fn(() => win),
+      describeWindow: vi.fn(() => ({ tabCount, hasPath: () => alreadyOpen })),
       confirmReplaceDocument: vi.fn(() => Promise.resolve(mayReplace)),
       isAppReady: vi.fn(() => appReady),
       setPendingFile: vi.fn(),
@@ -315,36 +318,45 @@ describe("createOpenFileHandler", () => {
   });
 
   describe("app running with a window", () => {
-    it("records the file and sends it to the renderer", async () => {
+    it("records the file and opens it in a new tab", async () => {
       const { deps, win, handle } = setup();
       expect(await handle(FILE)).toBe("sent");
       expect(deps.recordCurrentFile).toHaveBeenCalledWith(FILE);
       expect(win.webContents.send).toHaveBeenCalledTimes(1);
-      expect(win.webContents.send).toHaveBeenCalledWith("open-file", FILE);
+      expect(win.webContents.send).toHaveBeenCalledWith("open-file", FILE, "add");
+      expect(deps.confirmReplaceDocument).not.toHaveBeenCalled();
       expect(deps.setPendingFile).not.toHaveBeenCalled();
       expect(deps.createWindow).not.toHaveBeenCalled();
     });
 
-    it("asks the window to confirm replacing its drawing before recording or sending", async () => {
-      const { deps, win, handle } = setup();
-      await handle(FILE);
+    it("focuses the existing tab when that file is already open", async () => {
+      const { deps, win, handle } = setup({ alreadyOpen: true, tabCount: 8 });
+      expect(await handle(FILE)).toBe("sent");
+      expect(win.webContents.send).toHaveBeenCalledWith("open-file", FILE, "focus");
+      expect(deps.confirmReplaceDocument).not.toHaveBeenCalled();
+    });
+
+    it("asks before replacing the active tab when the window is at the cap", async () => {
+      const { deps, win, handle } = setup({ tabCount: 8 });
+      expect(await handle(FILE)).toBe("sent");
       expect(deps.confirmReplaceDocument).toHaveBeenCalledTimes(1);
       expect(deps.confirmReplaceDocument).toHaveBeenCalledWith(win);
       expect(deps.confirmReplaceDocument.mock.invocationCallOrder[0]).toBeLessThan(
         deps.recordCurrentFile.mock.invocationCallOrder[0],
       );
+      expect(win.webContents.send).toHaveBeenCalledWith("open-file", FILE, "replace");
     });
 
     it("focuses the window before prompting so the sheet appears on a visible window", async () => {
-      const { deps, win, handle } = setup();
+      const { deps, win, handle } = setup({ tabCount: 8 });
       await handle(FILE);
       expect(win.focus.mock.invocationCallOrder[0]).toBeLessThan(
         deps.confirmReplaceDocument.mock.invocationCallOrder[0],
       );
     });
 
-    it("leaves the drawing and the remembered path alone when the user cancels", async () => {
-      const { deps, win, handle } = setup({ mayReplace: false });
+    it("leaves the drawing and the remembered path alone when the user cancels the replace", async () => {
+      const { deps, win, handle } = setup({ tabCount: 8, mayReplace: false });
       expect(await handle(FILE)).toBe("cancelled");
       expect(deps.recordCurrentFile).not.toHaveBeenCalled();
       expect(win.webContents.send).not.toHaveBeenCalled();

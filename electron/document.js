@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { openModeFor } = require("./tabSession");
 
 // --- Window title + proxy icon ---
 
@@ -68,6 +69,8 @@ const missingFileError = (filePath) => ({
 });
 
 // electron calls are injected so every branch is unit-testable.
+// describeWindow(win) reports { tabCount, hasPath(filePath) } so a file opens in a new tab,
+// focuses the tab that already has it, or — only at the cap — replaces the active drawing.
 // confirmReplaceDocument(win) resolves false if the user cancelled the "Save changes?" prompt.
 const createOpenFileHandler = ({
   isAllowedPath,
@@ -76,6 +79,7 @@ const createOpenFileHandler = ({
   isStoreReady,
   recordCurrentFile,
   getWindow,
+  describeWindow,
   confirmReplaceDocument,
   isAppReady,
   setPendingFile,
@@ -101,12 +105,15 @@ const createOpenFileHandler = ({
 
     const win = getWindow();
     if (win) {
-      // app is running with a window: hand the file to the renderer once unsaved changes are dealt with
+      // app is running with a window: hand the file to the renderer. Replacing the active
+      // tab (only when the window is already at the cap) is the one path that can discard a drawing.
       if (win.isMinimized()) win.restore();
       win.focus();
-      if (!(await confirmReplaceDocument(win))) return "cancelled";
+      const { tabCount, hasPath } = describeWindow(win);
+      const mode = openModeFor({ tabCount, alreadyOpen: hasPath(filePath) });
+      if (mode === "replace" && !(await confirmReplaceDocument(win))) return "cancelled";
       recordCurrentFile(filePath);
-      win.webContents.send("open-file", filePath);
+      win.webContents.send("open-file", filePath, mode);
       return "sent";
     }
     recordCurrentFile(filePath);
