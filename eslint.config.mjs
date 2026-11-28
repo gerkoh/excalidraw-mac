@@ -28,6 +28,7 @@ export default [
         setInterval: "readonly",
         clearInterval: "readonly",
         Array: "readonly",
+        fetch: "readonly",
       },
     },
     settings: {

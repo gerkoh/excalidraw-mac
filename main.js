@@ -15,6 +15,13 @@ const {
 const { backgroundColorFor, createThemeController } = require("./electron/theme");
 const { attachNavigationGuard } = require("./electron/navigationGuard");
 const { createWindowSession } = require("./electron/windowSession");
+const { getLibraryPath } = require("./electron/libraryStore");
+const { registerLibraryIpcHandlers } = require("./electron/libraryIpc");
+const {
+  registerLibraryProtocolClient,
+  createLibraryInstallQueue,
+  handleLibraryInstallUrl,
+} = require("./electron/libraryInstall");
 
 // stores last opened file path + theme preference (initialized after app is initialized)
 let store;
@@ -124,6 +131,13 @@ const registerIpcHandlers = () => {
 
   // Excalidraw's in-app theme toggle maps onto an explicit Light/Dark preference
   ipcMain.on("set-theme-preference", (_event, preference) => theme.setPreference(preference));
+
+  // shape library: ~/Library/Application Support/excalidraw-mac/library.excalidrawlib
+  registerLibraryIpcHandlers({
+    ipcMain,
+    libraryPath: getLibraryPath(app.getPath("userData")),
+    installQueue: libraryInstallQueue,
+  });
 };
 
 // --- Window ---
@@ -212,6 +226,28 @@ const handleOpenFile = createOpenFileHandler({
     pendingFilePath = filePath;
   },
   createWindow: () => createWindow(),
+});
+
+// Library installs from libraries.excalidraw.com arrive as excalidraw-mac:// URLs.
+// open-url can fire before the app is ready, so requests are queued until the
+// renderer takes them.
+const libraryInstallQueue = createLibraryInstallQueue();
+
+registerLibraryProtocolClient({
+  app,
+  defaultApp: process.defaultApp,
+  execPath: process.execPath,
+  argv: process.argv,
+});
+
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  handleLibraryInstallUrl(url, {
+    installQueue: libraryInstallQueue,
+    getWindow: () => BrowserWindow.getAllWindows()[0],
+    isAppReady: () => app.isReady(),
+    createWindow,
+  });
 });
 
 // Finder double-click, Open With, and File -> Open Recent / Dock recent items all arrive here

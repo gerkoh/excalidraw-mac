@@ -53,6 +53,14 @@
     "extraResources": [
       "config.json"
     ],
+    "protocols": [
+      {
+        "name": "Excalidraw Library Install",
+        "schemes": [
+          "excalidraw-mac"
+        ]
+      }
+    ],
     "mac": {
       "target": "dmg",
       "icon": "excalidraw-app/icon.png",
