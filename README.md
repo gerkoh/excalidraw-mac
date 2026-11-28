@@ -109,27 +109,27 @@ sequenceDiagram
 
 ### Module Layout
 
-| Path                                         | Process  | Role                                                                                                             |
-| -------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------- |
-| `main.js`                                    | main     | Wiring only: IPC handlers, windows, menu, OS `open-file`                                                         |
-| `electron/fileService.js`                    | main     | Path validation, config reading, reading and writing `.excalidraw` files                                         |
-| `electron/atomicWrite.js`                    | main     | Atomic file write (temp file, fsync, rename) used for every drawing write                                        |
-| `electron/menu.js`                           | main     | Builds the application menu template (Electron calls are passed in)                                              |
-| `electron/document.js`                       | main     | Window title + proxy icon, "file became current" (lastOpenedPath + Open Recent), OS `open-file` handling         |
-| `electron/theme.js`                          | main     | Appearance preference, effective theme, `nativeTheme.themeSource`, Appearance menu                               |
-| `electron/unsavedChanges.js`                 | main     | "Save changes?" prompt: when to ask, and what each answer means (pure, see #4)                                   |
-| `electron/windowSession.js`                  | main     | Per-window document state, unsaved-changes guard and close handshake                                             |
-| `electron/navigationGuard.js`                | main     | Opens links in the system browser and keeps the window on the app (see #5)                                       |
-| `electron/libraryStore.js`                   | main     | Reads and writes the shape library at a fixed path in the app's data folder                                      |
-| `electron/libraryIpc.js`                     | main     | IPC for loading and saving the shape library                                                                     |
-| `electron/libraryInstall.js`                 | main     | `excalidraw-mac://` install links: registration, queueing, delivery to the renderer                              |
-| `shared/libraryUrl.mjs`                      | both     | Library URL allowlist and install-link parsing, shared by main and the renderer                                  |
-| `preload.js`                                 | preload  | Exposes `window.electronAPI`; self-contained since sandboxed preload can't `require` local files                 |
-| `excalidraw-app/src/App.jsx`                 | renderer | Mounts Excalidraw and wires the hooks                                                                            |
-| `excalidraw-app/src/hooks/`                  | renderer | `useFileOperations`, `useAutoSave` (also reports document state), `useTheme` and `useLibrary`                     |
-| `excalidraw-app/src/utils/saveController.js` | renderer | Current file, dirty state, debounced + coalesced saves; every renderer write goes through it                     |
-| `excalidraw-app/src/utils/themeUtils.js`     | renderer | Tells Excalidraw's in-app theme toggle apart from prop-driven theme changes                                      |
-| `excalidraw-app/src/utils/sceneUtils.js`     | renderer | Parse, load and serialize scenes (including the viewport, see #3 below)                                          |
+| Path                                         | Process  | Role                                                                                                     |
+| -------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------- |
+| `main.js`                                    | main     | Wiring only: IPC handlers, windows, menu, OS `open-file`                                                 |
+| `electron/fileService.js`                    | main     | Path validation, config reading, reading and writing `.excalidraw` files                                 |
+| `electron/atomicWrite.js`                    | main     | Atomic file write (temp file, fsync, rename) used for every drawing write                                |
+| `electron/menu.js`                           | main     | Builds the application menu template (Electron calls are passed in)                                      |
+| `electron/document.js`                       | main     | Window title + proxy icon, "file became current" (lastOpenedPath + Open Recent), OS `open-file` handling |
+| `electron/theme.js`                          | main     | Appearance preference, effective theme, `nativeTheme.themeSource`, Appearance menu                       |
+| `electron/unsavedChanges.js`                 | main     | "Save changes?" prompt: when to ask, and what each answer means (pure, see #4)                           |
+| `electron/windowSession.js`                  | main     | Per-window document state, unsaved-changes guard and close handshake                                     |
+| `electron/navigationGuard.js`                | main     | Opens links in the system browser and keeps the window on the app (see #5)                               |
+| `electron/libraryStore.js`                   | main     | Reads and writes the shape library at a fixed path in the app's data folder                              |
+| `electron/libraryIpc.js`                     | main     | IPC for loading and saving the shape library                                                             |
+| `electron/libraryInstall.js`                 | main     | `excalidraw-mac://` install links: registration, queueing, delivery to the renderer                      |
+| `shared/libraryUrl.mjs`                      | both     | Library URL allowlist and install-link parsing, shared by main and the renderer                          |
+| `preload.js`                                 | preload  | Exposes `window.electronAPI`; self-contained since sandboxed preload can't `require` local files         |
+| `excalidraw-app/src/App.jsx`                 | renderer | Mounts Excalidraw and wires the hooks                                                                    |
+| `excalidraw-app/src/hooks/`                  | renderer | `useFileOperations`, `useAutoSave` (also reports document state), `useTheme` and `useLibrary`            |
+| `excalidraw-app/src/utils/saveController.js` | renderer | Current file, dirty state, debounced + coalesced saves; every renderer write goes through it             |
+| `excalidraw-app/src/utils/themeUtils.js`     | renderer | Tells Excalidraw's in-app theme toggle apart from prop-driven theme changes                              |
+| `excalidraw-app/src/utils/sceneUtils.js`     | renderer | Parse, load and serialize scenes (including the viewport, see #3 below)                                  |
 
 ## Design Considerations
 

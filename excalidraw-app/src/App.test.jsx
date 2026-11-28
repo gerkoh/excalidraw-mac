@@ -11,6 +11,8 @@ vi.mock("@excalidraw/excalidraw", () => ({
   serializeAsJSON: vi.fn(() => "{}"),
   // scene snapshots hash the elements; the value only has to be stable
   hashElementsVersion: () => "0",
+  // the real hook needs a live editor; App's own tests cover the props, not the library
+  useHandleLibrary: () => {},
 }));
 vi.mock("@excalidraw/excalidraw/index.css", () => ({}));
 
@@ -36,6 +38,10 @@ const createElectronAPI = ({ theme = "light", lastPath = null, files = {} } = {}
     onOpenFile: noopSubscribe,
     onBeforeClose: noopSubscribe,
     setDocumentState: vi.fn(),
+    getLibrary: vi.fn(() => Promise.resolve(null)),
+    saveLibrary: vi.fn(() => Promise.resolve(true)),
+    takePendingLibraryInstalls: vi.fn(() => Promise.resolve([])),
+    onLibraryInstallRequested: noopSubscribe,
     getTheme: vi.fn(() => Promise.resolve(theme)),
     setThemePreference: vi.fn(),
     onThemeChanged: vi.fn((callback) => {
