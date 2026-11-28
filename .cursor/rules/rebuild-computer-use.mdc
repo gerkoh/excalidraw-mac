@@ -1,0 +1,10 @@
+---
+description: Test a rebuilt app with computer use before pushing
+alwaysApply: true
+---
+
+After rebuilding excalidraw-mac, test that build with computer use before any git push.
+
+- Launch the rebuilt binary directly with a throwaway `--user-data-dir`. Do not use `open --args` for that flag, and do not use the real `~/Library/Application Support/excalidraw-mac` store.
+- Exercise the change in the running app and confirm it on a screenshot.
+- Do not push until that check has been done.

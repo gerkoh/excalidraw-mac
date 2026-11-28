@@ -10,16 +10,8 @@
         height: 100%;
         margin: 0;
         overflow: hidden;
-      }
-      /* follows nativeTheme.themeSource; matches the BrowserWindow backgroundColor until Excalidraw paints */
-      :root {
-        color-scheme: light dark;
-      }
-      @media (prefers-color-scheme: dark) {
-        html,
-        body {
-          background-color: #121212;
-        }
+        /* the window background already matches the canvas theme; native chrome is pinned dark */
+        background: transparent;
       }
     </style>
     <script>
