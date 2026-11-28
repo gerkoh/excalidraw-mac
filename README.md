@@ -1,5 +1,7 @@
 # Excalidraw Mac
 
+![excalidraw-mac with several drawings open in tabs](docs/showcase.png)
+
 A desktop application for [Excalidraw](https://excalidraw.com/), which auto-saves your drawings to local files.
 
 ## Getting Started
