@@ -28,6 +28,7 @@ export default [
         setInterval: "readonly",
         clearInterval: "readonly",
         Array: "readonly",
+        fetch: "readonly",
       },
     },
     settings: {
@@ -60,6 +61,20 @@ export default [
     },
   },
 
+  // Code shared by main and renderer (plain ESM, only globals both environments have)
+  {
+    files: ["shared/**/*.mjs"],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
+      globals: {
+        URL: "readonly",
+        URLSearchParams: "readonly",
+        decodeURIComponent: "readonly",
+      },
+    },
+  },
+
   // Vite + Vitest config (ESM, Node)
   {
     files: ["vite.config.mjs", "vitest.config.mjs"],
@@ -81,6 +96,9 @@ export default [
         console: "readonly",
         process: "readonly",
         HTMLCanvasElement: "readonly",
+        URL: "readonly",
+        Blob: "readonly",
+        fetch: "readonly",
       },
     },
   },

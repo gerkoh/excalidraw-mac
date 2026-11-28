@@ -43,10 +43,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
   onBeforeClose: subscribe("before-close"),
   acknowledgeClose: () => ipcRenderer.send("close-acknowledged"),
 
-  // Document state ({ dirty, hasFilePath, hasContent }) for the edited dot and "Save changes?"
+  // Document state ({ filePath, dirty, hasFilePath, hasContent }) for the title,
+  // proxy icon, edited dot and "Save changes?" prompt
   setDocumentState: (state) => ipcRenderer.send("set-document-state", state),
 
   // Save As requested by main after the user picked "Save" in the unsaved-changes prompt
   onSaveAsRequest: subscribe("save-as-request"),
   sendSaveAsResult: (saved) => ipcRenderer.send("save-as-result", saved),
+
+  // Shape library, stored at a fixed path chosen by the main process
+  getLibrary: () => ipcRenderer.invoke("get-library"),
+  saveLibrary: (libraryItems) => ipcRenderer.invoke("save-library", libraryItems),
+
+  // Library installs from libraries.excalidraw.com (excalidraw-mac:// URLs).
+  // The event carries no data; call takePendingLibraryInstalls() to get the requests.
+  takePendingLibraryInstalls: () => ipcRenderer.invoke("take-pending-library-installs"),
+  onLibraryInstallRequested: subscribe("library-install-requested"),
 });

@@ -5,7 +5,9 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import useAutoSave from "./hooks/useAutoSave";
 import useFileOperations from "./hooks/useFileOperations";
 import useTheme from "./hooks/useTheme";
+import useLibrary from "./hooks/useLibrary";
 import { getSceneSnapshot, serializeScene } from "./utils/sceneUtils";
+import { LIBRARY_RETURN_URL } from "../../shared/libraryUrl.mjs";
 
 export default function App() {
   // on startup, we load config and check if there's a file to open (pending from OS or last opened)
@@ -47,6 +49,9 @@ export default function App() {
   // effective theme from View -> Appearance; the in-app toggle sets an explicit Light/Dark preference
   const { theme, handleAppThemeChange } = useTheme();
 
+  // shape library: persisted in the app's data folder, installable from libraries.excalidraw.com
+  useLibrary({ excalidrawAPI });
+
   // Excalidraw fires onChange on every interaction
   // capture latest scene elements and app state for save operations, feed the auto-saver,
   // and follow the in-app theme toggle
@@ -73,6 +78,7 @@ export default function App() {
         onChange={handleChange}
         initialData={initialData}
         theme={theme}
+        libraryReturnUrl={LIBRARY_RETURN_URL}
         UIOptions={{
           canvasActions: {
             // passing `theme` hides Excalidraw's toggle unless explicitly enabled

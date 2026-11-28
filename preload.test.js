@@ -73,6 +73,10 @@ describe("preload", () => {
         "setDocumentState",
         "onSaveAsRequest",
         "sendSaveAsResult",
+        "getLibrary",
+        "saveLibrary",
+        "takePendingLibraryInstalls",
+        "onLibraryInstallRequested",
       ].sort(),
     );
     Object.values(api).forEach((value) => expect(value).toBeTypeOf("function"));
@@ -95,6 +99,9 @@ describe("preload", () => {
       ["openFileDialog", [], ["open-file-dialog"]],
       ["saveFileDialog", ["{}"], ["save-file-dialog", "{}"]],
       ["getTheme", [], ["get-theme"]],
+      ["getLibrary", [], ["get-library"]],
+      ["saveLibrary", [[{ id: "a", elements: [] }]], ["save-library", [{ id: "a", elements: [] }]]],
+      ["takePendingLibraryInstalls", [], ["take-pending-library-installs"]],
     ])("%s invokes the right channel with its args", async (method, args, expected) => {
       loadPreload();
       await expect(api[method](...args)).resolves.toBe("invoke-result");
@@ -110,6 +117,34 @@ describe("preload", () => {
       expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(1, "get-config");
       expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(2, "get-last-path");
       expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(3, "get-theme");
+    });
+
+    it("never lets the renderer send a library path", () => {
+      loadPreload();
+      api.getLibrary("/etc/passwd");
+      api.saveLibrary([], "/Users/me/evil.excalidraw");
+      api.takePendingLibraryInstalls("unexpected");
+      expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(1, "get-library");
+      expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(2, "save-library", []);
+      expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(3, "take-pending-library-installs");
+    });
+
+    it("uses the same library channel names as the main process", () => {
+      const { LIBRARY_CHANNELS } = require("./electron/libraryIpc");
+      loadPreload();
+      api.getLibrary();
+      api.saveLibrary([]);
+      api.takePendingLibraryInstalls();
+      api.onLibraryInstallRequested(vi.fn());
+      expect(ipcRenderer.invoke.mock.calls.map(([channel]) => channel)).toEqual([
+        LIBRARY_CHANNELS.get,
+        LIBRARY_CHANNELS.save,
+        LIBRARY_CHANNELS.takePendingInstalls,
+      ]);
+      expect(ipcRenderer.on).toHaveBeenCalledWith(
+        LIBRARY_CHANNELS.installRequested,
+        expect.any(Function),
+      );
     });
 
     it("acknowledgeClose sends (not invokes) close-acknowledged", () => {
@@ -159,6 +194,7 @@ describe("preload", () => {
       ["onThemeChanged", "theme-changed"],
       ["onBeforeClose", "before-close"],
       ["onSaveAsRequest", "save-as-request"],
+      ["onLibraryInstallRequested", "library-install-requested"],
     ];
 
     it.each(listeners)("%s registers the callback on %s", (method, channel) => {

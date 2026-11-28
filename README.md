@@ -84,6 +84,17 @@ sequenceDiagram
     Preload->>Main: IPC
     Main->>Store: set lastOpenedPath = selected path
 
+    Note over App: Shape library
+    App->>Preload: getLibrary() / saveLibrary(items)
+    Preload->>Main: invoke "get-library" / "save-library"
+    Main->>FS: read / atomically write userData/library.excalidrawlib
+
+    Note over Main: excalidraw-mac://addlibrary#addLibrary=…
+    Main->>Main: open-url: validate URL, queue request
+    Main->>App: library-install-requested
+    App->>Preload: takePendingLibraryInstalls()
+    App->>App: fetch library, confirm, merge into library
+
     Note over App: ⌘W (Close) / ⌘Q (Quit)
     Main->>Main: "Save changes?" if untitled + edited + not empty
     Main->>App: save-as-request (only if the user chose Save)
@@ -98,23 +109,27 @@ sequenceDiagram
 
 ### Module Layout
 
-| Path                                         | Process  | Role                                                                                                             |
-| -------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------- |
-| `main.js`                                    | main     | Wiring only: IPC handlers, windows, menu, OS `open-file`                                                         |
-| `electron/fileService.js`                    | main     | Path validation, config reading, reading and writing `.excalidraw` files                                         |
-| `electron/atomicWrite.js`                    | main     | Atomic file write (temp file, fsync, rename) used for every drawing write                                        |
-| `electron/menu.js`                           | main     | Builds the application menu template (Electron calls are passed in)                                              |
-| `electron/document.js`                       | main     | Window title + proxy icon, "file became current" (lastOpenedPath + Open Recent), OS `open-file` handling         |
-| `electron/theme.js`                          | main     | Appearance preference, effective theme, `nativeTheme.themeSource`, Appearance menu                               |
-| `electron/unsavedChanges.js`                 | main     | "Save changes?" prompt: when to ask, and what each answer means (pure, see #4)                                   |
-| `electron/windowSession.js`                  | main     | Per-window document state, unsaved-changes guard and close handshake                                             |
-| `electron/navigationGuard.js`                | main     | Opens links in the system browser and keeps the window on the app (see #5)                                       |
-| `preload.js`                                 | preload  | Exposes `window.electronAPI`; self-contained since sandboxed preload can't `require` local files                 |
-| `excalidraw-app/src/App.jsx`                 | renderer | Mounts Excalidraw and wires the hooks                                                                            |
-| `excalidraw-app/src/hooks/`                  | renderer | `useFileOperations` (startup load, menu + OS events), `useAutoSave` (also reports document state) and `useTheme` |
-| `excalidraw-app/src/utils/saveController.js` | renderer | Current file, dirty state, debounced + coalesced saves; every renderer write goes through it                     |
-| `excalidraw-app/src/utils/themeUtils.js`     | renderer | Tells Excalidraw's in-app theme toggle apart from prop-driven theme changes                                      |
-| `excalidraw-app/src/utils/sceneUtils.js`     | renderer | Parse, load and serialize scenes (including the viewport, see #3 below)                                          |
+| Path                                         | Process  | Role                                                                                                     |
+| -------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------- |
+| `main.js`                                    | main     | Wiring only: IPC handlers, windows, menu, OS `open-file`                                                 |
+| `electron/fileService.js`                    | main     | Path validation, config reading, reading and writing `.excalidraw` files                                 |
+| `electron/atomicWrite.js`                    | main     | Atomic file write (temp file, fsync, rename) used for every drawing write                                |
+| `electron/menu.js`                           | main     | Builds the application menu template (Electron calls are passed in)                                      |
+| `electron/document.js`                       | main     | Window title + proxy icon, "file became current" (lastOpenedPath + Open Recent), OS `open-file` handling |
+| `electron/theme.js`                          | main     | Appearance preference, effective theme, `nativeTheme.themeSource`, Appearance menu                       |
+| `electron/unsavedChanges.js`                 | main     | "Save changes?" prompt: when to ask, and what each answer means (pure, see #4)                           |
+| `electron/windowSession.js`                  | main     | Per-window document state, unsaved-changes guard and close handshake                                     |
+| `electron/navigationGuard.js`                | main     | Opens links in the system browser and keeps the window on the app (see #5)                               |
+| `electron/libraryStore.js`                   | main     | Reads and writes the shape library at a fixed path in the app's data folder                              |
+| `electron/libraryIpc.js`                     | main     | IPC for loading and saving the shape library                                                             |
+| `electron/libraryInstall.js`                 | main     | `excalidraw-mac://` install links: registration, queueing, delivery to the renderer                      |
+| `shared/libraryUrl.mjs`                      | both     | Library URL allowlist and install-link parsing, shared by main and the renderer                          |
+| `preload.js`                                 | preload  | Exposes `window.electronAPI`; self-contained since sandboxed preload can't `require` local files         |
+| `excalidraw-app/src/App.jsx`                 | renderer | Mounts Excalidraw and wires the hooks                                                                    |
+| `excalidraw-app/src/hooks/`                  | renderer | `useFileOperations`, `useAutoSave` (also reports document state), `useTheme` and `useLibrary`            |
+| `excalidraw-app/src/utils/saveController.js` | renderer | Current file, dirty state, debounced + coalesced saves; every renderer write goes through it             |
+| `excalidraw-app/src/utils/themeUtils.js`     | renderer | Tells Excalidraw's in-app theme toggle apart from prop-driven theme changes                              |
+| `excalidraw-app/src/utils/sceneUtils.js`     | renderer | Parse, load and serialize scenes (including the viewport, see #3 below)                                  |
 
 ## Design Considerations
 
@@ -123,6 +138,8 @@ sequenceDiagram
 Electron's sandboxed preload scripts [don't support ESM](https://www.electronjs.org/docs/latest/tutorial/esm#sandboxed-preload-scripts-cant-use-esm-imports), so `preload.js`, `main.js` and the main-process modules in `electron/` must use `require()`. This is why `package.json` sets `"type": "commonjs"`. The renderer files under `excalidraw-app/src/` still use ESM `import`/`export` — Vite handles those, not Node.js.
 
 [`electron-store`](https://github.com/sindresorhus/electron-store) v12 is ESM-only and requires Node.js 22 or newer (and Electron 30 or newer). Electron 45 bundles Node.js 24, so `main.js` loads it with `require()` and takes the default export. That stays on the CommonJS loader, which still resolves inside a packaged asar. Dynamic `import()` is not used for this module, because that loader does not resolve packages inside asar archives.
+
+`shared/libraryUrl.mjs` is the one exception to CommonJS: the main process and the renderer both need the same library URL allowlist, so it's plain ESM with no imports. `main.js` loads it with `require()` the same way it loads `electron-store`, and Vite bundles it into the renderer.
 
 ### #2 Why does the main process write files instead of fileHandle.createWritable()?
 
@@ -189,7 +206,7 @@ If no file is open (an untitled drawing), nothing is auto-saved. Use ⌘S to pic
 
 Unit tests use [Vitest](https://vitest.dev/) and sit next to the code they cover as `*.test.js`. `vitest.config.mjs` splits them into two projects:
 
-- **main** (Node): `preload.test.js` and `electron/**/*.test.js`. These load the CommonJS modules with `createRequire`. The preload test swaps a fake `electron` into Node's require cache, because `vi.mock` can't intercept a CommonJS `require`.
+- **main** (Node): `preload.test.js`, `electron/**/*.test.js` and `shared/**/*.test.js`. These load the CommonJS modules with `createRequire`. The preload test swaps a fake `electron` into Node's require cache, because `vi.mock` can't intercept a CommonJS `require`.
 - **renderer** (jsdom): `excalidraw-app/src/**/*.test.{js,jsx}`. Hooks are tested with `@testing-library/react` and a mocked `window.electronAPI`. The real `@excalidraw/excalidraw` is used; `excalidraw-app/src/test/setup.js` stubs the canvas context it touches on import. `App.test.jsx` is the exception: it mocks the `Excalidraw` component to check the props `App` passes.
 
 Tests never launch Electron or touch your real drawings or electron-store. File I/O tests write to a temp directory.
@@ -229,6 +246,28 @@ If a recent file was moved or deleted, the app shows an error ("… can't be ope
 - Excalidraw's own theme toggle (main menu, or ⇧⌥D) stays visible. Using it sets the preference to that explicit theme (**Light** or **Dark**), and the Appearance menu updates to match. Choose **System** again to go back to following macOS.
 - Files saved by this app don't contain a theme (Excalidraw leaves `appState.theme` out of `.excalidraw` files), but files from other tools or older Excalidraw versions can. That `appState.theme` is **ignored when loading**: opening a file never changes the app's theme.
 - The window background matches the effective theme before the drawing loads, so there's no white flash on launch in dark mode.
+
+### Shape Library
+
+Your shape library (the "Library" sidebar) is saved automatically, separately from your drawings, so it's available in every drawing and survives restarts:
+
+```
+~/Library/Application Support/excalidraw-mac/library.excalidrawlib
+```
+
+It uses the standard `.excalidrawlib` format (`{ "type": "excalidrawlib", "version": 2, "libraryItems": [...] }`), so you can back it up or import it into excalidraw.com. Writes are atomic (temp file + rename). The renderer never chooses this path; it only sends library items over the `get-library` / `save-library` IPC channels.
+
+If the file is unreadable as a library (invalid JSON or not an `.excalidrawlib`), the app starts with an empty library and copies the bad file to `library.excalidrawlib.bak`. The original is only replaced once you change the library.
+
+#### Installing libraries from libraries.excalidraw.com
+
+1. Open the Library sidebar and click **Browse libraries**. The site opens in your default browser.
+2. Click **Add to Excalidraw** on a library. Your browser asks to open **excalidraw-mac**; allow it.
+3. The app comes to the front and asks you to confirm adding the shapes. Confirmed libraries are merged into your existing library.
+
+This works through the `excalidraw-mac://` URL scheme, which the packaged app registers with macOS (`build.protocols` in `package.json`). The site redirects to `excalidraw-mac://addlibrary#addLibrary=<library url>&token=<token>`. For safety, the app only downloads library URLs that are `https://libraries.excalidraw.com/...` (exact host, default port, no credentials). Anything else is rejected and logged. The app always asks before adding shapes, even when the request came from this app's own browse link.
+
+`npm start` registers the scheme for the development Electron binary. macOS may keep routing `excalidraw-mac://` links to whichever copy of the app registered last, so after testing in dev, open the packaged app once to make it the handler again.
 
 ## Known Limitations
 
