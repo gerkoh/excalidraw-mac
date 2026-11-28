@@ -9,7 +9,7 @@ export default defineConfig({
         test: {
           name: "main",
           environment: "node",
-          include: ["*.test.js", "electron/**/*.test.js"],
+          include: ["*.test.js", "electron/**/*.test.js", "shared/**/*.test.js"],
         },
       },
       {
