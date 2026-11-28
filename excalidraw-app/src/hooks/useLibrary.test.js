@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { useHandleLibrary, loadLibraryFromBlob } from "@excalidraw/excalidraw";
-import useLibrary, { libraryAdapter, installLibraryFromUrl } from "./useLibrary";
+import useLibrary, {
+  libraryAdapter,
+  installLibraryFromUrl,
+  registerLibraryEditor,
+  resetLibrarySync,
+} from "./useLibrary";
 import { isAllowedLibraryUrl } from "../../../shared/libraryUrl.mjs";
 
 // keep the real loaders; only the persistence hook is replaced so its options can be inspected
@@ -87,6 +92,7 @@ const createElectronAPI = ({ pending = [] } = {}) => {
 };
 
 beforeEach(() => {
+  resetLibrarySync();
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -141,6 +147,30 @@ describe("libraryAdapter", () => {
     await expect(libraryAdapter.save({ libraryItems: [] })).rejects.toThrow(
       "Couldn't save the library to disk",
     );
+  });
+
+  it("pushes a save into every mounted editor and serves that copy to the next load", async () => {
+    createElectronAPI();
+    const libraryItems = [{ id: "a", elements: [] }];
+    const first = { updateLibrary: vi.fn(() => libraryAdapter.save({ libraryItems })) };
+    const second = { updateLibrary: vi.fn(() => Promise.resolve([])) };
+    registerLibraryEditor(first);
+    registerLibraryEditor(second);
+
+    await libraryAdapter.save({ libraryItems });
+
+    expect(window.electronAPI.saveLibrary).toHaveBeenCalledTimes(1);
+    expect(window.electronAPI.saveLibrary).toHaveBeenCalledWith(libraryItems);
+    expect(first.updateLibrary).toHaveBeenCalledWith({
+      libraryItems,
+      merge: false,
+      prompt: false,
+      defaultStatus: "published",
+    });
+    expect(second.updateLibrary).toHaveBeenCalledTimes(1);
+    window.electronAPI.getLibrary.mockClear();
+    await expect(libraryAdapter.load()).resolves.toBe(libraryItems);
+    expect(window.electronAPI.getLibrary).not.toHaveBeenCalled();
   });
 
   it("save() propagates IPC errors", async () => {

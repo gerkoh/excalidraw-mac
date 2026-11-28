@@ -57,17 +57,25 @@ describe("preload", () => {
         "readFile",
         "writeFile",
         "getLastPath",
+        "getOpenTabs",
         "getPendingFile",
         "openFileDialog",
         "saveFileDialog",
         "onMenuNew",
+        "onMenuNewTab",
+        "onMenuCloseTab",
         "onMenuOpen",
         "onMenuSave",
         "onMenuSaveAs",
         "onOpenFile",
+        "onActivateTab",
+        "confirmCloseTab",
+        "confirmReplaceActive",
+        "closeWindow",
         "getTheme",
         "setThemePreference",
         "onThemeChanged",
+        "onWindowChrome",
         "onBeforeClose",
         "acknowledgeClose",
         "setDocumentState",
@@ -95,6 +103,9 @@ describe("preload", () => {
       ["readFile", ["/a.excalidraw"], ["read-file", "/a.excalidraw"]],
       ["writeFile", ["/a.excalidraw", "{}"], ["write-file", "/a.excalidraw", "{}"]],
       ["getLastPath", [], ["get-last-path"]],
+      ["getOpenTabs", [], ["get-open-tabs"]],
+      ["confirmCloseTab", ["tab-1"], ["confirm-close-tab", "tab-1"]],
+      ["confirmReplaceActive", [], ["confirm-replace-active"]],
       ["getPendingFile", [], ["get-pending-file"]],
       ["openFileDialog", [], ["open-file-dialog"]],
       ["saveFileDialog", ["{}"], ["save-file-dialog", "{}"]],
@@ -154,6 +165,13 @@ describe("preload", () => {
       expect(ipcRenderer.invoke).not.toHaveBeenCalled();
     });
 
+    it("closeWindow sends (not invokes) close-window", () => {
+      loadPreload();
+      expect(api.closeWindow()).toBeUndefined();
+      expect(ipcRenderer.send).toHaveBeenCalledWith("close-window");
+      expect(ipcRenderer.invoke).not.toHaveBeenCalled();
+    });
+
     it("setDocumentState sends (not invokes) the state on set-document-state", () => {
       loadPreload();
       const state = { dirty: true, hasFilePath: false, hasContent: true };
@@ -187,11 +205,15 @@ describe("preload", () => {
   describe("event listeners", () => {
     const listeners = [
       ["onMenuNew", "menu-new"],
+      ["onMenuNewTab", "menu-new-tab"],
+      ["onMenuCloseTab", "menu-close-tab"],
       ["onMenuOpen", "menu-open"],
       ["onMenuSave", "menu-save"],
       ["onMenuSaveAs", "menu-save-as"],
       ["onOpenFile", "open-file"],
+      ["onActivateTab", "activate-tab"],
       ["onThemeChanged", "theme-changed"],
+      ["onWindowChrome", "window-chrome"],
       ["onBeforeClose", "before-close"],
       ["onSaveAsRequest", "save-as-request"],
       ["onLibraryInstallRequested", "library-install-requested"],
