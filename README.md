@@ -95,15 +95,18 @@ sequenceDiagram
 
 ### Module Layout
 
-| Path                                     | Process  | Role                                                                                             |
-| ---------------------------------------- | -------- | ------------------------------------------------------------------------------------------------ |
-| `main.js`                                | main     | Wiring only: IPC handlers, window + close handshake, menu, OS `open-file`                        |
-| `electron/fileService.js`                | main     | Path validation, config reading, reading and writing `.excalidraw` files                         |
-| `electron/menu.js`                       | main     | Builds the application menu template (Electron calls are passed in)                              |
-| `preload.js`                             | preload  | Exposes `window.electronAPI`; self-contained since sandboxed preload can't `require` local files |
-| `excalidraw-app/src/App.jsx`             | renderer | Mounts Excalidraw and wires the hooks                                                            |
-| `excalidraw-app/src/hooks/`              | renderer | `useFileOperations` (startup load, menu + OS events) and `useAutoSave`                           |
-| `excalidraw-app/src/utils/sceneUtils.js` | renderer | Parse, load and serialize scenes (including the viewport, see #3 below)                          |
+| Path                                     | Process  | Role                                                                                                               |
+| ---------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------ |
+| `main.js`                                | main     | Wiring only: IPC handlers, window + close handshake, menu, OS `open-file`                                          |
+| `electron/fileService.js`                | main     | Path validation, config reading, reading and writing `.excalidraw` files                                           |
+| `electron/menu.js`                       | main     | Builds the application menu template (Electron calls are passed in)                                                |
+| `electron/document.js`                   | main     | Window title + proxy icon, "file became current" (lastOpenedPath + Open Recent), OS `open-file` handling           |
+| `electron/theme.js`                      | main     | Appearance preference, effective theme, `nativeTheme.themeSource`, Appearance menu                                 |
+| `preload.js`                             | preload  | Exposes `window.electronAPI`; self-contained since sandboxed preload can't `require` local files                   |
+| `excalidraw-app/src/App.jsx`             | renderer | Mounts Excalidraw and wires the hooks                                                                              |
+| `excalidraw-app/src/hooks/`              | renderer | `useFileOperations` (startup load, menu + OS events), `useAutoSave`, `useReportCurrentFile` (title) and `useTheme` |
+| `excalidraw-app/src/utils/themeUtils.js` | renderer | Tells Excalidraw's in-app theme toggle apart from prop-driven theme changes                                        |
+| `excalidraw-app/src/utils/sceneUtils.js` | renderer | Parse, load and serialize scenes (including the viewport, see #3 below)                                            |
 
 ## Design Considerations
 
@@ -162,7 +165,7 @@ If no file is open, the app will prompt you to save when you make changes.
 Unit tests use [Vitest](https://vitest.dev/) and sit next to the code they cover as `*.test.js`. `vitest.config.mjs` splits them into two projects:
 
 - **main** (Node): `preload.test.js` and `electron/**/*.test.js`. These load the CommonJS modules with `createRequire`. The preload test swaps a fake `electron` into Node's require cache, because `vi.mock` can't intercept a CommonJS `require`.
-- **renderer** (jsdom): `excalidraw-app/src/**/*.test.js`. Hooks are tested with `@testing-library/react` and a mocked `window.electronAPI`. The real `@excalidraw/excalidraw` is used; `excalidraw-app/src/test/setup.js` stubs the canvas context it touches on import.
+- **renderer** (jsdom): `excalidraw-app/src/**/*.test.{js,jsx}`. Hooks are tested with `@testing-library/react` and a mocked `window.electronAPI`. The real `@excalidraw/excalidraw` is used; `excalidraw-app/src/test/setup.js` stubs the canvas context it touches on import. `App.test.jsx` is the exception: it mocks the `Excalidraw` component to check the props `App` passes.
 
 Tests never launch Electron or touch your real drawings or electron-store. File I/O tests write to a temp directory.
 
@@ -199,7 +202,7 @@ If a recent file was moved or deleted, the app shows an error ("… can't be ope
 **View → Appearance** offers **System** (default), **Light** and **Dark**. The choice is stored in electron-store as `themePreference` and also sets `nativeTheme.themeSource`, so native menus and dialogs match. With **System**, the app follows macOS appearance changes live.
 
 - Excalidraw's own theme toggle (main menu, or ⇧⌥D) stays visible. Using it sets the preference to that explicit theme (**Light** or **Dark**), and the Appearance menu updates to match. Choose **System** again to go back to following macOS.
-- `.excalidraw` files store `appState.theme`. It is still written when saving, so the file stays compatible with excalidraw.com, but it is **ignored when loading**: opening a file never changes the app's theme.
+- Files saved by this app don't contain a theme (Excalidraw leaves `appState.theme` out of `.excalidraw` files), but files from other tools or older Excalidraw versions can. That `appState.theme` is **ignored when loading**: opening a file never changes the app's theme.
 - The window background matches the effective theme before the drawing loads, so there's no white flash on launch in dark mode.
 
 ## Known Limitations
