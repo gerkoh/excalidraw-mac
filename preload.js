@@ -45,4 +45,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Before-close event (main process asks renderer to save before closing)
   onBeforeClose: subscribe("before-close"),
   acknowledgeClose: () => ipcRenderer.send("close-acknowledged"),
+
+  // Document state ({ dirty, hasFilePath, hasContent }) for the edited dot and "Save changes?"
+  setDocumentState: (state) => ipcRenderer.send("set-document-state", state),
+
+  // Save As requested by main after the user picked "Save" in the unsaved-changes prompt
+  onSaveAsRequest: subscribe("save-as-request"),
+  sendSaveAsResult: (saved) => ipcRenderer.send("save-as-result", saved),
 });

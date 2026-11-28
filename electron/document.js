@@ -69,7 +69,8 @@ const missingFileError = (filePath) => ({
   content: `The file may have been moved, renamed or deleted.\n\n${filePath}`,
 });
 
-// electron calls are injected so every branch is unit-testable
+// electron calls are injected so every branch is unit-testable.
+// confirmReplaceDocument(win) resolves false if the user cancelled the "Save changes?" prompt.
 const createOpenFileHandler = ({
   isAllowedPath,
   isReadable,
@@ -77,11 +78,12 @@ const createOpenFileHandler = ({
   isStoreReady,
   recordCurrentFile,
   getWindow,
+  confirmReplaceDocument,
   isAppReady,
   setPendingFile,
   createWindow,
 }) => {
-  return (filePath) => {
+  return async (filePath) => {
     if (!isAllowedPath(filePath)) return "ignored";
 
     // a recent item can point at a moved/deleted file: tell the user and leave the current drawing alone
@@ -98,16 +100,18 @@ const createOpenFileHandler = ({
       setPendingFile(filePath);
       return "queued";
     }
-    recordCurrentFile(filePath);
 
     const win = getWindow();
     if (win) {
-      // app is running with a window: hand the file to the renderer
+      // app is running with a window: hand the file to the renderer once unsaved changes are dealt with
       if (win.isMinimized()) win.restore();
       win.focus();
+      if (!(await confirmReplaceDocument(win))) return "cancelled";
+      recordCurrentFile(filePath);
       win.webContents.send("open-file", filePath);
       return "sent";
     }
+    recordCurrentFile(filePath);
     setPendingFile(filePath);
     if (isAppReady()) {
       // app is running but all windows are closed (e.g. Cmd+W): reopen, renderer picks up the pending file

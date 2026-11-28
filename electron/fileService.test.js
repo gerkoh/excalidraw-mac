@@ -8,7 +8,6 @@ import { fileURLToPath } from "url";
 const require = createRequire(import.meta.url);
 const {
   isAllowedPath,
-  fileExists,
   readConfig,
   readDrawing,
   writeDrawing,
@@ -60,22 +59,6 @@ describe("isAllowedPath", () => {
     "/etc/passwd",
   ])("rejects %j", (filePath) => {
     expect(isAllowedPath(filePath)).toBe(false);
-  });
-});
-
-describe("fileExists", () => {
-  it("is true for an existing file", async () => {
-    const filePath = path.join(tmpDir, "a.excalidraw");
-    fs.writeFileSync(filePath, "");
-    await expect(fileExists(filePath)).resolves.toBe(true);
-  });
-
-  it("is true for an existing directory", async () => {
-    await expect(fileExists(tmpDir)).resolves.toBe(true);
-  });
-
-  it("is false for a missing path, without throwing", async () => {
-    await expect(fileExists(path.join(tmpDir, "missing.excalidraw"))).resolves.toBe(false);
   });
 });
 

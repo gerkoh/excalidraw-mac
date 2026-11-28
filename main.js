@@ -1,6 +1,6 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, nativeTheme } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Menu, nativeTheme, shell } = require("electron");
 const path = require("path");
-const fs = require("fs");
+const { pathToFileURL } = require("url");
 // electron-store v12 is ESM-only. Electron 45's Node can require() it;
 // the class is the default export.
 const { default: Store } = require("electron-store");
@@ -13,6 +13,8 @@ const {
   isReadableFile,
 } = require("./electron/document");
 const { backgroundColorFor, createThemeController } = require("./electron/theme");
+const { attachNavigationGuard } = require("./electron/navigationGuard");
+const { createWindowSession } = require("./electron/windowSession");
 
 // stores last opened file path + theme preference (initialized after app is initialized)
 let store;
@@ -26,6 +28,22 @@ let theme;
 const configPath = app.isPackaged
   ? path.join(process.resourcesPath, "config.json")
   : path.join(__dirname, "config.json");
+
+const indexPath = path.join(__dirname, "excalidraw-app/dist/index.html");
+const appUrl = pathToFileURL(indexPath).href;
+
+// --- Window sessions (document state + close handshake), keyed by webContents id ---
+
+const sessions = new Map();
+let isQuitting = false;
+
+const sessionFor = (webContents) => sessions.get(webContents.id);
+
+// resolves true when the window's drawing may be replaced (prompting for unsaved changes if needed)
+const confirmReplaceDocument = async (win) => {
+  const session = sessionFor(win.webContents);
+  return session ? session.confirmReplaceDocument() : true;
+};
 
 // --- IPC Handlers (registered inside app.whenReady) ---
 
@@ -52,9 +70,9 @@ const registerIpcHandlers = () => {
     return p;
   });
 
-  ipcMain.handle("open-file-dialog", async () => {
-    const win = BrowserWindow.getFocusedWindow();
-    const config = readConfig(configPath);
+  ipcMain.handle("open-file-dialog", async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const config = await readConfig(configPath);
     const result = await dialog.showOpenDialog(win, {
       defaultPath: config?.defaultOpenDir || undefined,
       filters: [{ name: "Excalidraw", extensions: ["excalidraw"] }],
@@ -63,34 +81,25 @@ const registerIpcHandlers = () => {
     if (result.canceled || result.filePaths.length === 0) return null;
 
     const filePath = result.filePaths[0];
-    try {
-      const content = fs.readFileSync(filePath, "utf-8");
-      recordCurrentFile(filePath);
-      return { path: filePath, content };
-    } catch (err) {
-      console.error("[main] Failed to read opened file:", err);
-      return null;
-    }
+    const content = await readDrawing(filePath);
+    if (content === null) return null;
+    recordCurrentFile(filePath);
+    return { path: filePath, content };
   });
 
-  ipcMain.handle("save-file-dialog", async (_event, content) => {
-    const win = BrowserWindow.getFocusedWindow();
-    const config = readConfig(configPath);
+  ipcMain.handle("save-file-dialog", async (event, content) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const config = await readConfig(configPath);
     const result = await dialog.showSaveDialog(win, {
       defaultPath: config?.defaultOpenDir || undefined,
       filters: [{ name: "Excalidraw", extensions: ["excalidraw"] }],
     });
-    if (result.canceled) return null;
+    if (result.canceled || !result.filePath) return null;
 
     const filePath = result.filePath;
-    try {
-      fs.writeFileSync(filePath, content, "utf-8");
-      recordCurrentFile(filePath);
-      return filePath;
-    } catch (err) {
-      console.error("[main] Failed to save file:", err);
-      return null;
-    }
+    if (!(await writeDrawing(filePath, content))) return null;
+    recordCurrentFile(filePath);
+    return filePath;
   });
 
   // renderer's currentFilePath is the single source of truth for the window title + proxy icon
@@ -102,18 +111,34 @@ const registerIpcHandlers = () => {
     }),
   );
 
+  // renderer → main: dirty / untitled / empty state of the current drawing
+  ipcMain.on("set-document-state", (event, state) => {
+    sessionFor(event.sender)?.setDocumentState(state);
+  });
+
+  ipcMain.on("save-as-result", (event, saved) => {
+    sessionFor(event.sender)?.handleSaveAsResult(saved);
+  });
+
+  ipcMain.on("close-acknowledged", (event) => {
+    sessionFor(event.sender)?.handleCloseAcknowledged();
+  });
+
   ipcMain.handle("get-theme", () => theme.getEffectiveTheme());
 
   // Excalidraw's in-app theme toggle maps onto an explicit Light/Dark preference
   ipcMain.on("set-theme-preference", (_event, preference) => theme.setPreference(preference));
 };
+
 // --- Window ---
 
+// read once at startup; createWindow stays synchronous so `activate` can't race into two windows
+let windowConfig = null;
+
 const createWindow = () => {
-  const config = readConfig(configPath);
   const win = new BrowserWindow({
-    width: config?.windowWidth ?? 1512,
-    height: config?.windowHeight ?? 982,
+    width: windowConfig?.windowWidth ?? 1512,
+    height: windowConfig?.windowHeight ?? 982,
     icon: path.join(__dirname, "excalidraw-app/icon.png"),
     // replaced by the file name once the renderer reports its current file
     title: app.name,
@@ -124,45 +149,36 @@ const createWindow = () => {
     },
   });
 
-  // the title tracks the current file (set-current-file), so ignore index.html's <title>
+  // the title tracks the current file, so ignore index.html's <title>
   win.on("page-title-updated", (e) => e.preventDefault());
 
-  // Intercept close to let the renderer do a final save before the window is destroyed
-  let allowClose = false;
-  let isQuitting = false;
+  // the id is unavailable once the window is destroyed, so capture it for cleanup
+  const webContentsId = win.webContents.id;
+  const session = createWindowSession({
+    win,
+    showMessageBox: (parent, options) => dialog.showMessageBox(parent, options),
+    isQuitting: () => isQuitting,
+    onCloseCancelled: () => {
+      isQuitting = false;
+    },
+    quit: () => app.quit(),
+  });
+  sessions.set(webContentsId, session);
 
-  app.on("before-quit", () => {
-    isQuitting = true;
+  win.on("close", (event) => {
+    session.handleClose(event);
+  });
+  win.on("closed", () => {
+    sessions.delete(webContentsId);
+  });
+  win.webContents.on("render-process-gone", () => session.handleRendererGone());
+
+  attachNavigationGuard(win.webContents, {
+    appUrl,
+    openExternal: (url) => shell.openExternal(url),
   });
 
-  const finishClose = () => {
-    allowClose = true;
-    win.close();
-    if (isQuitting) {
-      app.quit();
-    }
-  };
-
-  const onCloseAcknowledged = () => finishClose();
-
-  win.on("close", (e) => {
-    if (allowClose) return;
-    e.preventDefault();
-    win.webContents.send("before-close");
-
-    // Safety timeout: force close if renderer doesn't acknowledge (e.g. crash, not yet loaded)
-    setTimeout(() => {
-      if (!allowClose) {
-        console.warn("[main] Close not acknowledged in time, forcing close");
-        ipcMain.removeListener("close-acknowledged", onCloseAcknowledged);
-        finishClose();
-      }
-    }, 3000);
-  });
-
-  ipcMain.once("close-acknowledged", onCloseAcknowledged);
-
-  win.loadFile("./excalidraw-app/dist/index.html");
+  win.loadFile(indexPath);
   return win;
 };
 
@@ -173,6 +189,7 @@ const buildMenu = () => {
     appName: app.name,
     getFocusedWindow: () => BrowserWindow.getFocusedWindow(),
     clearLastOpenedPath: () => store.set("lastOpenedPath", null),
+    confirmReplaceDocument,
     themePreference: theme.getPreference(),
     setThemePreference: (preference) => theme.setPreference(preference),
   });
@@ -193,6 +210,7 @@ const handleOpenFile = createOpenFileHandler({
   isStoreReady: () => store != null,
   recordCurrentFile: (filePath) => recordCurrentFile(filePath),
   getWindow: () => BrowserWindow.getAllWindows()[0] ?? null,
+  confirmReplaceDocument,
   isAppReady: () => app.isReady(),
   setPendingFile: (filePath) => {
     pendingFilePath = filePath;
@@ -206,7 +224,14 @@ app.on("open-file", (event, filePath) => {
   handleOpenFile(filePath);
 });
 
-app.whenReady().then(() => {
+// registered once for the app; each window session reads it through isQuitting()
+app.on("before-quit", () => {
+  isQuitting = true;
+});
+
+app.whenReady().then(async () => {
+  // loaded before the store so that, once `store` is set, createWindow has its config
+  windowConfig = await readConfig(configPath);
   // saves to ~/Library/Application Support/excalidraw-mac/excalidraw-mac.json
   store = new Store({ name: "excalidraw-mac" });
   recordCurrentFile = createCurrentFileRecorder({

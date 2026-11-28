@@ -6,14 +6,20 @@ const { buildMenuTemplate } = require("./menu");
 
 const createFakeWindow = () => ({ webContents: { send: vi.fn() } });
 
-const setup = ({ focusedWindow = createFakeWindow(), themePreference = "system" } = {}) => {
+const setup = ({
+  focusedWindow = createFakeWindow(),
+  themePreference = "system",
+  mayReplace = true,
+} = {}) => {
   const getFocusedWindow = vi.fn(() => focusedWindow);
   const clearLastOpenedPath = vi.fn();
   const setThemePreference = vi.fn();
+  const confirmReplaceDocument = vi.fn(() => Promise.resolve(mayReplace));
   const template = buildMenuTemplate({
     appName: "excalidraw-mac",
     getFocusedWindow,
     clearLastOpenedPath,
+    confirmReplaceDocument,
     themePreference,
     setThemePreference,
   });
@@ -25,6 +31,7 @@ const setup = ({ focusedWindow = createFakeWindow(), themePreference = "system" 
     focusedWindow,
     getFocusedWindow,
     clearLastOpenedPath,
+    confirmReplaceDocument,
     setThemePreference,
     findMenu,
     findFileItem,
@@ -49,15 +56,23 @@ describe("buildMenuTemplate", () => {
       appName: "Other Name",
       getFocusedWindow: () => null,
       clearLastOpenedPath: () => {},
+      confirmReplaceDocument: () => Promise.resolve(true),
     });
     expect(template[0].label).toBe("Other Name");
   });
 
   it("does not touch the window or store while building", () => {
-    const { getFocusedWindow, clearLastOpenedPath, setThemePreference, focusedWindow } = setup();
+    const {
+      getFocusedWindow,
+      clearLastOpenedPath,
+      confirmReplaceDocument,
+      setThemePreference,
+      focusedWindow,
+    } = setup();
     expect(getFocusedWindow).not.toHaveBeenCalled();
     expect(clearLastOpenedPath).not.toHaveBeenCalled();
     expect(setThemePreference).not.toHaveBeenCalled();
+    expect(confirmReplaceDocument).not.toHaveBeenCalled();
     expect(focusedWindow.webContents.send).not.toHaveBeenCalled();
   });
 
@@ -79,46 +94,55 @@ describe("buildMenuTemplate", () => {
     ["Open…", "Cmd+O", "menu-open"],
     ["Save", "Cmd+S", "menu-save"],
     ["Save As…", "Cmd+Shift+S", "menu-save-as"],
-  ])("%s has accelerator %s and sends %s to the focused window", (label, accelerator, channel) => {
-    const { findFileItem, focusedWindow } = setup();
-    const item = findFileItem(label);
-    expect(item.accelerator).toBe(accelerator);
+  ])(
+    "%s has accelerator %s and sends %s to the focused window",
+    async (label, accelerator, channel) => {
+      const { findFileItem, focusedWindow } = setup();
+      const item = findFileItem(label);
+      expect(item.accelerator).toBe(accelerator);
 
-    item.click();
+      await item.click();
 
-    expect(focusedWindow.webContents.send).toHaveBeenCalledTimes(1);
-    expect(focusedWindow.webContents.send).toHaveBeenCalledWith(channel);
-  });
-
-  it.each(["New", "Open…", "Save", "Save As…"])(
-    "%s does nothing to windows when none is focused",
-    (label) => {
-      const { findFileItem, getFocusedWindow } = setup({ focusedWindow: null });
-      expect(() => findFileItem(label).click()).not.toThrow();
-      expect(getFocusedWindow).toHaveBeenCalledTimes(1);
+      expect(focusedWindow.webContents.send).toHaveBeenCalledTimes(1);
+      expect(focusedWindow.webContents.send).toHaveBeenCalledWith(channel);
     },
   );
 
-  it("New clears the last opened path before notifying the window", () => {
+  it.each(["New", "Open…", "Save", "Save As…"])(
+    "%s does nothing to windows when none is focused",
+    async (label) => {
+      const { findFileItem, getFocusedWindow, confirmReplaceDocument } = setup({
+        focusedWindow: null,
+      });
+      await expect(Promise.resolve(findFileItem(label).click())).resolves.toBeUndefined();
+      expect(getFocusedWindow).toHaveBeenCalledTimes(1);
+      expect(confirmReplaceDocument).not.toHaveBeenCalled();
+    },
+  );
+
+  it("New clears the last opened path before notifying the window", async () => {
     const { findFileItem, clearLastOpenedPath, focusedWindow } = setup();
-    findFileItem("New").click();
+    await findFileItem("New").click();
     expect(clearLastOpenedPath).toHaveBeenCalledTimes(1);
     expect(clearLastOpenedPath.mock.invocationCallOrder[0]).toBeLessThan(
       focusedWindow.webContents.send.mock.invocationCallOrder[0],
     );
   });
 
-  it("New clears the last opened path even when no window is focused", () => {
+  it("New clears the last opened path even when no window is focused", async () => {
     const { findFileItem, clearLastOpenedPath } = setup({ focusedWindow: null });
-    findFileItem("New").click();
+    await findFileItem("New").click();
     expect(clearLastOpenedPath).toHaveBeenCalledTimes(1);
   });
 
-  it.each(["Open…", "Save", "Save As…"])("%s does not clear the last opened path", (label) => {
-    const { findFileItem, clearLastOpenedPath } = setup();
-    findFileItem(label).click();
-    expect(clearLastOpenedPath).not.toHaveBeenCalled();
-  });
+  it.each(["Open…", "Save", "Save As…"])(
+    "%s does not clear the last opened path",
+    async (label) => {
+      const { findFileItem, clearLastOpenedPath } = setup();
+      await findFileItem(label).click();
+      expect(clearLastOpenedPath).not.toHaveBeenCalled();
+    },
+  );
 
   it("looks up the focused window at click time, not build time", () => {
     const first = createFakeWindow();
@@ -128,6 +152,7 @@ describe("buildMenuTemplate", () => {
       appName: "excalidraw-mac",
       getFocusedWindow,
       clearLastOpenedPath: () => {},
+      confirmReplaceDocument: () => Promise.resolve(true),
     });
     const save = template[1].submenu.find((item) => item.label === "Save");
 
@@ -136,6 +161,75 @@ describe("buildMenuTemplate", () => {
 
     expect(first.webContents.send).toHaveBeenCalledTimes(1);
     expect(second.webContents.send).toHaveBeenCalledTimes(1);
+  });
+
+  describe("unsaved changes guard", () => {
+    it.each(["New", "Open…"])(
+      "%s asks to resolve unsaved changes of the focused window first",
+      async (label) => {
+        const { findFileItem, confirmReplaceDocument, focusedWindow } = setup();
+        await findFileItem(label).click();
+        expect(confirmReplaceDocument).toHaveBeenCalledTimes(1);
+        expect(confirmReplaceDocument).toHaveBeenCalledWith(focusedWindow);
+        expect(confirmReplaceDocument.mock.invocationCallOrder[0]).toBeLessThan(
+          focusedWindow.webContents.send.mock.invocationCallOrder[0],
+        );
+      },
+    );
+
+    it.each(["New", "Open…"])("%s does nothing when the user cancels", async (label) => {
+      const { findFileItem, clearLastOpenedPath, focusedWindow } = setup({ mayReplace: false });
+      await findFileItem(label).click();
+      expect(focusedWindow.webContents.send).not.toHaveBeenCalled();
+      expect(clearLastOpenedPath).not.toHaveBeenCalled();
+    });
+
+    it("New does not clear the last opened path until the user has decided", async () => {
+      let decide;
+      const { findFileItem, clearLastOpenedPath, confirmReplaceDocument, focusedWindow } = setup();
+      confirmReplaceDocument.mockReturnValue(
+        new Promise((resolve) => {
+          decide = resolve;
+        }),
+      );
+
+      const clicking = findFileItem("New").click();
+      await Promise.resolve();
+      expect(clearLastOpenedPath).not.toHaveBeenCalled();
+      expect(focusedWindow.webContents.send).not.toHaveBeenCalled();
+
+      decide(true);
+      await clicking;
+      expect(clearLastOpenedPath).toHaveBeenCalledTimes(1);
+      expect(focusedWindow.webContents.send).toHaveBeenCalledWith("menu-new");
+    });
+
+    it("sends to the window that was focused when clicked, even if focus moves meanwhile", async () => {
+      const first = createFakeWindow();
+      const second = createFakeWindow();
+      const getFocusedWindow = vi.fn().mockReturnValueOnce(first).mockReturnValue(second);
+      const template = buildMenuTemplate({
+        appName: "excalidraw-mac",
+        getFocusedWindow,
+        clearLastOpenedPath: () => {},
+        confirmReplaceDocument: () => Promise.resolve(true),
+      });
+      const open = template[1].submenu.find((item) => item.label === "Open…");
+
+      await open.click();
+
+      expect(first.webContents.send).toHaveBeenCalledWith("menu-open");
+      expect(second.webContents.send).not.toHaveBeenCalled();
+    });
+
+    it.each(["Save", "Save As…"])(
+      "%s never prompts (it doesn't replace the drawing)",
+      async (label) => {
+        const { findFileItem, confirmReplaceDocument } = setup();
+        await findFileItem(label).click();
+        expect(confirmReplaceDocument).not.toHaveBeenCalled();
+      },
+    );
   });
 
   it("keeps the standard roles in the app, Edit, View and Window menus", () => {

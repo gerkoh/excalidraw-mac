@@ -7,15 +7,6 @@ const isAllowedPath = (filePath) => {
   return typeof filePath === "string" && filePath.endsWith(".excalidraw");
 };
 
-const fileExists = async (filePath) => {
-  try {
-    await fs.promises.access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 // --- Config ---
 
 // read config from file
@@ -65,4 +56,4 @@ const writeDrawing = async (filePath, content) => {
   }
 };
 
-module.exports = { isAllowedPath, fileExists, readConfig, readDrawing, writeDrawing };
+module.exports = { isAllowedPath, readConfig, readDrawing, writeDrawing };
