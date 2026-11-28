@@ -4,6 +4,8 @@ const fs = require("fs");
 // electron-store v12 is ESM-only. Electron 45's Node can require() it;
 // the class is the default export.
 const { default: Store } = require("electron-store");
+const { isAllowedPath, readConfig, readDrawing, writeDrawing } = require("./electron/fileService");
+const { buildMenuTemplate } = require("./electron/menu");
 
 // stores last opened file path (initialized after app is initialized)
 let store;
@@ -14,55 +16,14 @@ const configPath = app.isPackaged
   ? path.join(process.resourcesPath, "config.json")
   : path.join(__dirname, "config.json");
 
-// read config from file
-const readConfig = () => {
-  try {
-    const content = fs.readFileSync(configPath, "utf-8");
-    return JSON.parse(content);
-  } catch (err) {
-    console.error("[main] Failed to read config:", err);
-    return null;
-  }
-};
-
-// --- Path Validation ---
-
-const isAllowedPath = (filePath) => {
-  return typeof filePath === "string" && filePath.endsWith(".excalidraw");
-};
-
 // --- IPC Handlers (registered inside app.whenReady) ---
 
 const registerIpcHandlers = () => {
-  ipcMain.handle("get-config", () => readConfig());
+  ipcMain.handle("get-config", () => readConfig(configPath));
 
-  ipcMain.handle("read-file", (_event, filePath) => {
-    try {
-      if (!isAllowedPath(filePath)) {
-        console.error("[main] Rejected read for disallowed path:", filePath);
-        return null;
-      }
-      if (!fs.existsSync(filePath)) return null;
-      return fs.readFileSync(filePath, "utf-8");
-    } catch (err) {
-      console.error("[main] Failed to read file:", filePath, err);
-      return null;
-    }
-  });
+  ipcMain.handle("read-file", (_event, filePath) => readDrawing(filePath));
 
-  ipcMain.handle("write-file", (_event, filePath, content) => {
-    try {
-      if (!isAllowedPath(filePath)) {
-        console.error("[main] Rejected write for disallowed path:", filePath);
-        return false;
-      }
-      fs.writeFileSync(filePath, content, "utf-8");
-      return true;
-    } catch (err) {
-      console.error("[main] Failed to write file:", filePath, err);
-      return false;
-    }
-  });
+  ipcMain.handle("write-file", (_event, filePath, content) => writeDrawing(filePath, content));
 
   // Get last opened file path
   ipcMain.handle("get-last-path", () => {
@@ -81,7 +42,7 @@ const registerIpcHandlers = () => {
 
   ipcMain.handle("open-file-dialog", async () => {
     const win = BrowserWindow.getFocusedWindow();
-    const config = readConfig();
+    const config = readConfig(configPath);
     const result = await dialog.showOpenDialog(win, {
       defaultPath: config?.defaultOpenDir || undefined,
       filters: [{ name: "Excalidraw", extensions: ["excalidraw"] }],
@@ -102,7 +63,7 @@ const registerIpcHandlers = () => {
 
   ipcMain.handle("save-file-dialog", async (_event, content) => {
     const win = BrowserWindow.getFocusedWindow();
-    const config = readConfig();
+    const config = readConfig(configPath);
     const result = await dialog.showSaveDialog(win, {
       defaultPath: config?.defaultOpenDir || undefined,
       filters: [{ name: "Excalidraw", extensions: ["excalidraw"] }],
@@ -123,7 +84,7 @@ const registerIpcHandlers = () => {
 // --- Window ---
 
 const createWindow = () => {
-  const config = readConfig();
+  const config = readConfig(configPath);
   const win = new BrowserWindow({
     width: config?.windowWidth ?? 1512,
     height: config?.windowHeight ?? 982,
@@ -175,87 +136,11 @@ const createWindow = () => {
 // --- Application Menu ---
 
 const buildMenu = () => {
-  const template = [
-    {
-      label: app.name,
-      submenu: [
-        { role: "about" },
-        { type: "separator" },
-        { role: "hide" },
-        { role: "hideOthers" },
-        { role: "unhide" },
-        { type: "separator" },
-        { role: "quit" },
-      ],
-    },
-    {
-      label: "File",
-      submenu: [
-        {
-          label: "New",
-          accelerator: "Cmd+N",
-          click: () => {
-            // auto clear last opened path on triggering new file with electron-store
-            store.set("lastOpenedPath", null);
-            const win = BrowserWindow.getFocusedWindow();
-            if (win) win.webContents.send("menu-new");
-          },
-        },
-        { type: "separator" },
-        {
-          label: "Open…",
-          accelerator: "Cmd+O",
-          click: () => {
-            const win = BrowserWindow.getFocusedWindow();
-            if (win) win.webContents.send("menu-open");
-          },
-        },
-        {
-          label: "Save",
-          accelerator: "Cmd+S",
-          click: () => {
-            const win = BrowserWindow.getFocusedWindow();
-            if (win) win.webContents.send("menu-save");
-          },
-        },
-        {
-          label: "Save As…",
-          accelerator: "Cmd+Shift+S",
-          click: () => {
-            const win = BrowserWindow.getFocusedWindow();
-            if (win) win.webContents.send("menu-save-as");
-          },
-        },
-      ],
-    },
-    {
-      label: "Edit",
-      submenu: [
-        { role: "undo" },
-        { role: "redo" },
-        { type: "separator" },
-        { role: "cut" },
-        { role: "copy" },
-        { role: "paste" },
-        { role: "selectAll" },
-      ],
-    },
-    {
-      label: "View",
-      submenu: [
-        { role: "reload" },
-        { role: "toggleDevTools" },
-        { type: "separator" },
-        { role: "zoomIn" },
-        { role: "zoomOut" },
-        { role: "resetZoom" },
-        { type: "separator" },
-        { role: "togglefullscreen" },
-      ],
-    },
-    { label: "Window", submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }] },
-  ];
-
+  const template = buildMenuTemplate({
+    appName: app.name,
+    getFocusedWindow: () => BrowserWindow.getFocusedWindow(),
+    clearLastOpenedPath: () => store.set("lastOpenedPath", null),
+  });
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 };
 

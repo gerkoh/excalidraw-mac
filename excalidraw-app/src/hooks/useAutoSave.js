@@ -99,4 +99,5 @@ const useAutoSave = ({
   }, [currentFilePath, config, excalidrawAPI]);
 };
 
+export { isElementsChanged };
 export default useAutoSave;

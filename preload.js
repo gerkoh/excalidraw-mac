@@ -1,5 +1,11 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
+// sandboxed preload can't require local modules, so this helper stays inline
+const subscribe = (channel) => (callback) => {
+  ipcRenderer.on(channel, callback);
+  return () => ipcRenderer.removeListener(channel, callback);
+};
+
 contextBridge.exposeInMainWorld("electronAPI", {
   // Config (read-only — edit config.json directly)
   getConfig: () => ipcRenderer.invoke("get-config"),
@@ -20,33 +26,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Menu event listeners (main process → renderer)
   // Each returns an unsubscribe function for cleanup
-  onMenuNew: (callback) => {
-    ipcRenderer.on("menu-new", callback);
-    return () => ipcRenderer.removeListener("menu-new", callback);
-  },
-  onMenuOpen: (callback) => {
-    ipcRenderer.on("menu-open", callback);
-    return () => ipcRenderer.removeListener("menu-open", callback);
-  },
-  onMenuSave: (callback) => {
-    ipcRenderer.on("menu-save", callback);
-    return () => ipcRenderer.removeListener("menu-save", callback);
-  },
-  onMenuSaveAs: (callback) => {
-    ipcRenderer.on("menu-save-as", callback);
-    return () => ipcRenderer.removeListener("menu-save-as", callback);
-  },
+  onMenuNew: subscribe("menu-new"),
+  onMenuOpen: subscribe("menu-open"),
+  onMenuSave: subscribe("menu-save"),
+  onMenuSaveAs: subscribe("menu-save-as"),
 
   // OS open-file event (double-click / Open With)
-  onOpenFile: (callback) => {
-    ipcRenderer.on("open-file", callback);
-    return () => ipcRenderer.removeListener("open-file", callback);
-  },
+  onOpenFile: subscribe("open-file"),
 
   // Before-close event (main process asks renderer to save before closing)
-  onBeforeClose: (callback) => {
-    ipcRenderer.on("before-close", callback);
-    return () => ipcRenderer.removeListener("before-close", callback);
-  },
+  onBeforeClose: subscribe("before-close"),
   acknowledgeClose: () => ipcRenderer.send("close-acknowledged"),
 });

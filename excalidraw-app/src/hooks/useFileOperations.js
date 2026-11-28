@@ -57,11 +57,25 @@ const useFileOperations = ({
   useEffect(() => {
     if (!excalidrawAPI) return;
 
+    // serialize the scene and write it to the current file; resolves to writeFile's result
+    const writeCurrentFile = async () => {
+      const content = getSerializedScene();
+      return window.electronAPI.writeFile(currentFilePathRef.current, content);
+    };
+
+    // parse file content and swap it into the canvas; returns false if content is malformed
+    const loadFileContent = (filePath, content) => {
+      const data = parseInitialData(content);
+      if (!data) return false;
+      loadScene(excalidrawAPI, data);
+      setCurrentFilePath(filePath);
+      return true;
+    };
+
     // Save the current file before switching to a new one
     const saveCurrentFile = async () => {
       if (!currentFilePathRef.current) return;
-      const content = getSerializedScene();
-      await window.electronAPI.writeFile(currentFilePathRef.current, content);
+      await writeCurrentFile();
       console.log("[useFileOperations] Saved before switching:", currentFilePathRef.current);
     };
 
@@ -84,12 +98,8 @@ const useFileOperations = ({
       if (!result) return; // user cancelled
 
       await saveCurrentFile();
-      const data = parseInitialData(result.content);
-      if (!data) return;
+      if (!loadFileContent(result.path, result.content)) return;
       console.log("[useFileOperations] Opened file and loaded data:", result.path);
-
-      loadScene(excalidrawAPI, data);
-      setCurrentFilePath(result.path);
     };
 
     // ⇧⌘S - save as
@@ -111,8 +121,7 @@ const useFileOperations = ({
         console.log("[useFileOperations] No current file, triggering 'Save As'");
         return handleSaveAs();
       }
-      const content = getSerializedScene();
-      const success = await window.electronAPI.writeFile(currentFilePathRef.current, content);
+      const success = await writeCurrentFile();
       if (success) {
         console.log("[useFileOperations] Saved to existing file:", currentFilePathRef.current);
       }
@@ -126,20 +135,15 @@ const useFileOperations = ({
         console.error("[useFileOperations] Failed to read file from OS:", filePath);
         return;
       }
-      const data = parseInitialData(content);
-      if (!data) return;
+      if (!loadFileContent(filePath, content)) return;
       console.log("[useFileOperations] Opened file from OS and loaded data:", filePath);
-
-      loadScene(excalidrawAPI, data);
-      setCurrentFilePath(filePath);
     };
 
     // Final save before window closes (Cmd+Q, Cmd+W, close button)
     const handleBeforeClose = async () => {
       if (currentFilePathRef.current) {
         console.log("[useFileOperations] Before-close: saving to", currentFilePathRef.current);
-        const content = getSerializedScene();
-        await window.electronAPI.writeFile(currentFilePathRef.current, content);
+        await writeCurrentFile();
       }
       window.electronAPI.acknowledgeClose();
     };

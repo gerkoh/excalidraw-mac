@@ -43,7 +43,7 @@ export default [
 
   // Electron main process + preload (CommonJS, Node globals)
   {
-    files: ["main.js", "preload.js"],
+    files: ["main.js", "preload.js", "electron/**/*.js"],
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "commonjs",
@@ -58,12 +58,28 @@ export default [
     },
   },
 
-  // Vite config (ESM, Node)
+  // Vite + Vitest config (ESM, Node)
   {
-    files: ["vite.config.mjs"],
+    files: ["vite.config.mjs", "vitest.config.mjs"],
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "module",
+    },
+  },
+
+  // Tests (ESM, run by Vitest; vitest APIs are imported explicitly, not globals)
+  // main-process tests load the CommonJS modules under test via createRequire
+  {
+    files: ["**/*.test.{js,jsx}", "excalidraw-app/src/test/**/*.js"],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
+      globals: {
+        window: "readonly",
+        console: "readonly",
+        process: "readonly",
+        HTMLCanvasElement: "readonly",
+      },
     },
   },
 
