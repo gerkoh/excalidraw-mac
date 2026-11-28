@@ -1,5 +1,5 @@
-/* Brave's tab strip: the row is the window chrome, tabs sit on its bottom
-   edge, and the active tab is the same color as the canvas so the two join. */
+/* Brave's tab strip: the row is the window chrome and tabs sit on its bottom
+   edge. The active tab stays dark in both themes, whatever color the canvas is. */
 
 .drawing-tabs {
   display: flex;
@@ -44,14 +44,9 @@
   color: #5f6368;
 }
 
-.drawing-tabs-dark .drawing-tab[data-active="true"] {
+.drawing-tab[data-active="true"] {
   background: #121212;
   color: #e8eaed;
-}
-
-.drawing-tabs-light .drawing-tab[data-active="true"] {
-  background: #ffffff;
-  color: #202124;
 }
 
 .drawing-tabs-dark .drawing-tab:not([data-active="true"]):hover {
@@ -135,7 +130,8 @@
   opacity: 1;
 }
 
-.drawing-tabs-dark .drawing-tab-close:hover {
+.drawing-tabs-dark .drawing-tab-close:hover,
+.drawing-tab[data-active="true"] .drawing-tab-close:hover {
   background: rgba(255, 255, 255, 0.16);
 }
 
