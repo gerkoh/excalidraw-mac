@@ -1,5 +1,17 @@
 import { serializeAsJSON } from "@excalidraw/excalidraw";
 
+// app-level settings a drawing must not override when loaded
+// (.excalidraw files carry appState.theme, but the theme follows View -> Appearance)
+const APP_LEVEL_APP_STATE_KEYS = ["theme"];
+
+const stripAppLevelAppState = (appState) => {
+  const stripped = { ...appState };
+  for (const key of APP_LEVEL_APP_STATE_KEYS) {
+    delete stripped[key];
+  }
+  return stripped;
+};
+
 const parseInitialData = (content) => {
   let parsed;
   try {
@@ -12,7 +24,7 @@ const parseInitialData = (content) => {
     return null;
   }
 
-  const appState = parsed.appState || {};
+  const appState = stripAppLevelAppState(parsed.appState || {});
   // check if file has viewport info; if not, trigger scrollToContent on load
   const hasViewport = appState.scrollX != null && appState.scrollY != null;
 
@@ -52,4 +64,4 @@ const serializeScene = (sceneElementsRef, appStateRef, excalidrawAPI) => {
   return JSON.stringify(data, null, 2);
 };
 
-export { parseInitialData, loadScene, serializeScene };
+export { stripAppLevelAppState, parseInitialData, loadScene, serializeScene };

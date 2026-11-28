@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { parseInitialData, loadScene, serializeScene } from "./sceneUtils";
+import { stripAppLevelAppState, parseInitialData, loadScene, serializeScene } from "./sceneUtils";
 
 const rectangle = {
   id: "rect-1",
@@ -272,5 +272,93 @@ describe("serializeScene", () => {
     expect(data.elements).toHaveLength(1);
     expect(data.appState.scrollX).toBe(9);
     expect(api.getFiles).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("app-level theme is never taken from a file", () => {
+  describe("stripAppLevelAppState", () => {
+    it.each(["light", "dark", "sepia", null, undefined])("removes theme %j", (theme) => {
+      expect(stripAppLevelAppState({ theme, gridSize: 20 })).toEqual({ gridSize: 20 });
+    });
+
+    it("leaves appState without a theme unchanged", () => {
+      expect(stripAppLevelAppState({ scrollX: 1, viewBackgroundColor: "#fff" })).toEqual({
+        scrollX: 1,
+        viewBackgroundColor: "#fff",
+      });
+    });
+
+    it("handles an empty appState", () => {
+      expect(stripAppLevelAppState({})).toEqual({});
+    });
+
+    it("does not mutate its input", () => {
+      const appState = { theme: "dark", scrollX: 1 };
+      stripAppLevelAppState(appState);
+      expect(appState).toEqual({ theme: "dark", scrollX: 1 });
+    });
+  });
+
+  it.each(["light", "dark"])("parseInitialData drops a saved %s theme", (theme) => {
+    const data = parseInitialData(
+      JSON.stringify({
+        elements: [rectangle],
+        appState: { theme, scrollX: 5, scrollY: 6, viewBackgroundColor: "#fff" },
+      }),
+    );
+    expect(data.appState).toEqual({ scrollX: 5, scrollY: 6, viewBackgroundColor: "#fff" });
+    expect(data.appState).not.toHaveProperty("theme");
+  });
+
+  it("parseInitialData still restores the viewport when the file had a theme", () => {
+    const data = parseInitialData(
+      JSON.stringify({ elements: [], appState: { theme: "dark", scrollX: 0, scrollY: 0 } }),
+    );
+    expect(data).not.toHaveProperty("scrollToContent");
+  });
+
+  it("parseInitialData drops the theme from an excalidraw.com export", () => {
+    const data = parseInitialData(
+      JSON.stringify({
+        type: "excalidraw",
+        source: "https://excalidraw.com",
+        elements: [],
+        appState: { theme: "dark", gridSize: 20 },
+      }),
+    );
+    expect(data.appState).toEqual({ gridSize: 20 });
+    expect(data.scrollToContent).toBe(true);
+  });
+
+  it("loadScene never passes a theme to updateScene for a parsed file", () => {
+    const api = createExcalidrawAPI();
+    loadScene(
+      api,
+      parseInitialData(JSON.stringify({ elements: [], appState: { theme: "dark", scrollX: 1 } })),
+    );
+    const { appState } = api.updateScene.mock.calls[0][0];
+    expect(appState).not.toHaveProperty("theme");
+  });
+
+  it("serializeScene doesn't write the theme (Excalidraw marks it export: false)", () => {
+    const json = JSON.parse(
+      serializeScene(
+        { current: [rectangle] },
+        { current: { theme: "dark", scrollX: 0, scrollY: 0 } },
+        createExcalidrawAPI(),
+      ),
+    );
+    expect(json.appState).not.toHaveProperty("theme");
+  });
+
+  it("a saved file round-trips without carrying its theme back in", () => {
+    const content = serializeScene(
+      { current: [rectangle] },
+      { current: { theme: "dark", scrollX: 3, scrollY: 4, zoom: { value: 1 } } },
+      createExcalidrawAPI(),
+    );
+    const data = parseInitialData(content);
+    expect(data.appState).not.toHaveProperty("theme");
+    expect(data.appState.scrollX).toBe(3);
   });
 });

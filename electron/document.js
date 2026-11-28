@@ -1,0 +1,141 @@
+const fs = require("fs");
+const path = require("path");
+
+// --- Window title + proxy icon ---
+
+const UNTITLED = "Untitled";
+
+// "/a/b/diagram.excalidraw" -> "diagram"; only the last extension is dropped ("a.b.excalidraw" -> "a.b")
+const formatWindowTitle = (filePath) => {
+  if (typeof filePath !== "string" || filePath.trim() === "") return UNTITLED;
+  const base = path.basename(filePath);
+  const title = path.basename(base, path.extname(base));
+  return title === "" ? UNTITLED : title;
+};
+
+// title + macOS proxy icon (Cmd-click path menu); "" clears the proxy icon for untitled drawings
+const applyCurrentFileToWindow = (win, filePath) => {
+  if (!win || win.isDestroyed()) return;
+  win.setTitle(formatWindowTitle(filePath));
+  // setRepresentedFilename only exists on macOS
+  if (typeof win.setRepresentedFilename === "function") {
+    win.setRepresentedFilename(filePath || "");
+  }
+};
+
+// IPC "set-current-file": the renderer reports its currentFilePath (null = untitled) whenever it changes
+const createSetCurrentFileHandler = ({ isAllowedPath, getWindowFromWebContents }) => {
+  return (event, filePath) => {
+    if (filePath !== null && !isAllowedPath(filePath)) {
+      console.error("[main] Rejected set-current-file for disallowed path:", filePath);
+      return false;
+    }
+    const win = getWindowFromWebContents(event.sender);
+    if (!win) return false;
+    applyCurrentFileToWindow(win, filePath);
+    return true;
+  };
+};
+
+// --- "File became current" bookkeeping ---
+
+// one place that persists the last opened path and feeds File -> Open Recent
+const createCurrentFileRecorder = ({ store, addRecentDocument, isAllowedPath }) => {
+  return (filePath) => {
+    if (!isAllowedPath(filePath)) {
+      console.error("[main] Not recording disallowed path:", filePath);
+      return false;
+    }
+    store.set("lastOpenedPath", filePath);
+    addRecentDocument(filePath);
+    return true;
+  };
+};
+
+// --- OS open-file (Finder double-click, Open With, Dock / File -> Open Recent) ---
+
+const isReadableFile = (filePath) => {
+  try {
+    if (!fs.statSync(filePath).isFile()) return false;
+    fs.accessSync(filePath, fs.constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const missingFileError = (filePath) => ({
+  title: `"${path.basename(filePath)}" can't be opened`,
+  content: `The file may have been moved, renamed or deleted.\n\n${filePath}`,
+});
+
+// electron calls are injected so every branch is unit-testable
+const createOpenFileHandler = ({
+  isAllowedPath,
+  isReadable,
+  showError,
+  isStoreReady,
+  recordCurrentFile,
+  getWindow,
+  isAppReady,
+  setPendingFile,
+  createWindow,
+}) => {
+  return (filePath) => {
+    if (!isAllowedPath(filePath)) return "ignored";
+
+    // a recent item can point at a moved/deleted file: tell the user and leave the current drawing alone
+    if (!isReadable(filePath)) {
+      console.error("[main] open-file target is missing or unreadable:", filePath);
+      const { title, content } = missingFileError(filePath);
+      showError(title, content);
+      return "missing";
+    }
+
+    // store isn't created until app.whenReady(); get-pending-file records it later
+    if (!isStoreReady()) {
+      console.warn("[main] Store not ready, queuing pending file:", filePath);
+      setPendingFile(filePath);
+      return "queued";
+    }
+    recordCurrentFile(filePath);
+
+    const win = getWindow();
+    if (win) {
+      // app is running with a window: hand the file to the renderer
+      if (win.isMinimized()) win.restore();
+      win.focus();
+      win.webContents.send("open-file", filePath);
+      return "sent";
+    }
+    setPendingFile(filePath);
+    if (isAppReady()) {
+      // app is running but all windows are closed (e.g. Cmd+W): reopen, renderer picks up the pending file
+      createWindow();
+      return "reopened";
+    }
+    // app is still launching
+    return "queued";
+  };
+};
+
+// --- Menu ---
+
+// macOS fills this submenu with recent documents and fires app "open-file" when one is chosen
+const buildOpenRecentMenuItem = () => ({
+  label: "Open Recent",
+  role: "recentDocuments",
+  submenu: [{ label: "Clear Menu", role: "clearRecentDocuments" }],
+});
+
+module.exports = {
+  UNTITLED,
+  formatWindowTitle,
+  applyCurrentFileToWindow,
+  createSetCurrentFileHandler,
+  createCurrentFileRecorder,
+  isReadableFile,
+  missingFileError,
+  createOpenFileHandler,
+  buildOpenRecentMenuItem,
+};

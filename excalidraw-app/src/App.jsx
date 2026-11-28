@@ -4,6 +4,8 @@ import "@excalidraw/excalidraw/index.css";
 import { useState, useRef, useCallback, useEffect } from "react";
 import useAutoSave from "./hooks/useAutoSave";
 import useFileOperations from "./hooks/useFileOperations";
+import useReportCurrentFile from "./hooks/useReportCurrentFile";
+import useTheme from "./hooks/useTheme";
 import { serializeScene } from "./utils/sceneUtils";
 
 export default function App() {
@@ -43,16 +45,26 @@ export default function App() {
   // auto-save writes to the current file path (inactive until a file is opened/saved)
   useAutoSave({ sceneElementsRef, currentFilePath, config, excalidrawAPI, getSerializedScene });
 
+  // window title + proxy icon follow the current file
+  useReportCurrentFile({ currentFilePath, isReady: initialData !== undefined });
+
+  // effective theme from View -> Appearance; the in-app toggle sets an explicit Light/Dark preference
+  const { theme, handleAppThemeChange } = useTheme();
+
   // Excalidraw fires onChange on every interaction
   // capture latest scene elements and app state for save operations
-  const handleChange = useCallback((sceneElements, appState) => {
-    appStateRef.current = appState;
-    sceneElementsRef.current = sceneElements;
-  }, []);
+  const handleChange = useCallback(
+    (sceneElements, appState) => {
+      appStateRef.current = appState;
+      sceneElementsRef.current = sceneElements;
+      handleAppThemeChange(appState.theme);
+    },
+    [handleAppThemeChange],
+  );
 
-  // Block rendering until startup file check resolves:
-  // undefined = still loading, null = no file, {...} = file data
-  if (initialData === undefined) {
+  // Block rendering until startup file check and theme resolve:
+  // initialData: undefined = still loading, null = no file, {...} = file data
+  if (initialData === undefined || theme === undefined) {
     return null;
   }
 
@@ -62,8 +74,11 @@ export default function App() {
         excalidrawAPI={setExcalidrawAPI}
         onChange={handleChange}
         initialData={initialData}
+        theme={theme}
         UIOptions={{
           canvasActions: {
+            // passing `theme` hides Excalidraw's toggle unless explicitly enabled
+            toggleTheme: true,
             loadScene: false,
             saveToActiveFile: false,
             export: false,
