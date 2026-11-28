@@ -39,14 +39,41 @@ const buildAppearanceMenuItem = ({ themePreference, setThemePreference }) => {
   };
 };
 
-// owns the preference -> nativeTheme.themeSource -> windows flow; electron objects are injected for tests
-const createThemeController = ({ store, nativeTheme, getAllWindows, rebuildMenu }) => {
+// Native dialogs, alerts, and the menu bar stay dark. The canvas theme is separate.
+const NATIVE_CHROME_THEME = "dark";
+const MAC_INTERFACE_STYLE_KEY = "AppleInterfaceStyle";
+const MAC_APPEARANCE_NOTIFICATION = "AppleInterfaceThemeChangedNotification";
+
+// AppleInterfaceStyle is "Dark" while the Mac is in dark mode, and missing in light mode.
+// nativeTheme.shouldUseDarkColors cannot be used once themeSource is pinned to dark.
+const readMacSystemIsDark = (systemPreferences) => {
+  try {
+    return systemPreferences.getUserDefault(MAC_INTERFACE_STYLE_KEY, "string") === "Dark";
+  } catch {
+    return false;
+  }
+};
+
+const watchMacSystemAppearance = (systemPreferences, listener) => {
+  if (typeof systemPreferences.subscribeNotification !== "function") return;
+  systemPreferences.subscribeNotification(MAC_APPEARANCE_NOTIFICATION, () => listener());
+};
+
+// owns the preference -> canvas theme flow. Native chrome is pinned dark.
+// isSystemDark and onSystemThemeChange are injected so tests do not touch macOS.
+const createThemeController = ({
+  store,
+  nativeTheme,
+  getAllWindows,
+  rebuildMenu,
+  isSystemDark,
+  onSystemThemeChange,
+}) => {
   const getPreference = () => normalizeThemePreference(store.get("themePreference"));
 
-  const getEffectiveTheme = () =>
-    resolveEffectiveTheme(getPreference(), nativeTheme.shouldUseDarkColors);
+  const getEffectiveTheme = () => resolveEffectiveTheme(getPreference(), isSystemDark());
 
-  // pushes the effective theme to every window; idempotent, safe to call on every nativeTheme "updated"
+  // pushes the effective canvas theme to every window
   const broadcast = () => {
     const theme = getEffectiveTheme();
     for (const win of getAllWindows()) {
@@ -57,10 +84,9 @@ const createThemeController = ({ store, nativeTheme, getAllWindows, rebuildMenu 
     return theme;
   };
 
-  // themeSource makes native dialogs, menus and the renderer's prefers-color-scheme match
   const init = () => {
-    nativeTheme.themeSource = getPreference();
-    nativeTheme.on("updated", broadcast);
+    nativeTheme.themeSource = NATIVE_CHROME_THEME;
+    onSystemThemeChange(broadcast);
   };
 
   const setPreference = (preference) => {
@@ -69,10 +95,9 @@ const createThemeController = ({ store, nativeTheme, getAllWindows, rebuildMenu 
       return false;
     }
     store.set("themePreference", preference);
-    nativeTheme.themeSource = preference;
+    nativeTheme.themeSource = NATIVE_CHROME_THEME;
     // radio checks must follow changes that didn't come from the menu (Excalidraw's in-app toggle)
     rebuildMenu();
-    // "updated" doesn't fire when the effective colours stay the same, so push explicitly
     broadcast();
     return true;
   };
@@ -89,5 +114,8 @@ module.exports = {
   resolveEffectiveTheme,
   backgroundColorFor,
   buildAppearanceMenuItem,
+  NATIVE_CHROME_THEME,
+  readMacSystemIsDark,
+  watchMacSystemAppearance,
   createThemeController,
 };

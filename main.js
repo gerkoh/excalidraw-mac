@@ -1,4 +1,13 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, nativeTheme, shell } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  ipcMain,
+  dialog,
+  Menu,
+  nativeTheme,
+  shell,
+  systemPreferences,
+} = require("electron");
 const path = require("path");
 const { pathToFileURL } = require("url");
 // electron-store v12 is ESM-only. Electron 45's Node can require() it;
@@ -12,7 +21,12 @@ const {
   applyReportedFile,
   isReadableFile,
 } = require("./electron/document");
-const { backgroundColorFor, createThemeController } = require("./electron/theme");
+const {
+  backgroundColorFor,
+  createThemeController,
+  readMacSystemIsDark,
+  watchMacSystemAppearance,
+} = require("./electron/theme");
 const { attachNavigationGuard } = require("./electron/navigationGuard");
 const { createWindowSession } = require("./electron/windowSession");
 const { filterStoredTabs, normalizeStoredSession } = require("./electron/tabSession");
@@ -383,6 +397,8 @@ app.whenReady().then(async () => {
     nativeTheme,
     getAllWindows: () => BrowserWindow.getAllWindows(),
     rebuildMenu: () => buildMenu(),
+    isSystemDark: () => readMacSystemIsDark(systemPreferences),
+    onSystemThemeChange: (listener) => watchMacSystemAppearance(systemPreferences, listener),
   });
   theme.init();
 

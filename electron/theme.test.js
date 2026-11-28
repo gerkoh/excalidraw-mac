@@ -12,6 +12,9 @@ const {
   resolveEffectiveTheme,
   backgroundColorFor,
   buildAppearanceMenuItem,
+  NATIVE_CHROME_THEME,
+  readMacSystemIsDark,
+  watchMacSystemAppearance,
   createThemeController,
 } = require("./theme");
 
@@ -88,18 +91,57 @@ describe("buildAppearanceMenuItem", () => {
   });
 });
 
-const createFakeNativeTheme = ({ systemIsDark = false } = {}) => {
-  const nativeTheme = new EventEmitter();
-  nativeTheme.systemIsDark = systemIsDark;
-  nativeTheme.themeSource = "system";
-  // mirrors Electron: themeSource overrides the OS when it's light/dark
-  Object.defineProperty(nativeTheme, "shouldUseDarkColors", {
-    get() {
-      if (this.themeSource === "dark") return true;
-      if (this.themeSource === "light") return false;
-      return this.systemIsDark;
-    },
+describe("readMacSystemIsDark", () => {
+  it("is dark only when AppleInterfaceStyle is Dark", () => {
+    const systemPreferences = {
+      getUserDefault: vi.fn(() => "Dark"),
+    };
+    expect(readMacSystemIsDark(systemPreferences)).toBe(true);
+    expect(systemPreferences.getUserDefault).toHaveBeenCalledWith("AppleInterfaceStyle", "string");
   });
+
+  it.each([undefined, null, "", "Light"])("treats %j as light", (style) => {
+    expect(readMacSystemIsDark({ getUserDefault: () => style })).toBe(false);
+  });
+
+  it("treats a missing defaults key as light", () => {
+    expect(
+      readMacSystemIsDark({
+        getUserDefault: () => {
+          throw new Error("key missing");
+        },
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("watchMacSystemAppearance", () => {
+  it("broadcasts when macOS changes appearance", () => {
+    const listener = vi.fn();
+    let notify;
+    const systemPreferences = {
+      subscribeNotification: vi.fn((name, callback) => {
+        notify = callback;
+        return 1;
+      }),
+    };
+    watchMacSystemAppearance(systemPreferences, listener);
+    expect(systemPreferences.subscribeNotification).toHaveBeenCalledWith(
+      "AppleInterfaceThemeChangedNotification",
+      expect.any(Function),
+    );
+    notify("AppleInterfaceThemeChangedNotification", {}, "");
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("does nothing when the platform has no notification API", () => {
+    expect(() => watchMacSystemAppearance({}, vi.fn())).not.toThrow();
+  });
+});
+
+const createFakeNativeTheme = () => {
+  const nativeTheme = new EventEmitter();
+  nativeTheme.themeSource = "system";
   return nativeTheme;
 };
 
@@ -123,15 +165,31 @@ const createFakeWindow = ({ destroyed = false } = {}) => ({
 describe("createThemeController", () => {
   const setup = ({ stored, systemIsDark = false, windows = [createFakeWindow()] } = {}) => {
     const store = createFakeStore(stored === undefined ? {} : { themePreference: stored });
-    const nativeTheme = createFakeNativeTheme({ systemIsDark });
+    const nativeTheme = createFakeNativeTheme();
     const rebuildMenu = vi.fn();
+    let systemDark = systemIsDark;
+    let notifySystemChange = () => {};
     const controller = createThemeController({
       store,
       nativeTheme,
       getAllWindows: () => windows,
       rebuildMenu,
+      isSystemDark: () => systemDark,
+      onSystemThemeChange: (listener) => {
+        notifySystemChange = listener;
+      },
     });
-    return { store, nativeTheme, rebuildMenu, windows, controller };
+    return {
+      store,
+      nativeTheme,
+      rebuildMenu,
+      windows,
+      controller,
+      setSystemDark(next) {
+        systemDark = next;
+        notifySystemChange();
+      },
+    };
   };
 
   describe("getPreference", () => {
@@ -149,36 +207,31 @@ describe("createThemeController", () => {
   });
 
   describe("init", () => {
-    it.each(["light", "dark", "system"])("sets nativeTheme.themeSource to stored %s", (stored) => {
-      const { nativeTheme, controller } = setup({ stored });
-      controller.init();
-      expect(nativeTheme.themeSource).toBe(stored);
-    });
+    it.each(["light", "dark", "system", 123])(
+      "pins native chrome to dark when the stored preference is %j",
+      (stored) => {
+        const { nativeTheme, controller } = setup({ stored });
+        nativeTheme.themeSource = "light";
+        controller.init();
+        expect(nativeTheme.themeSource).toBe(NATIVE_CHROME_THEME);
+      },
+    );
 
-    it("sets themeSource to system for a corrupted stored value", () => {
-      const { nativeTheme, controller } = setup({ stored: 123 });
-      nativeTheme.themeSource = "dark";
-      controller.init();
-      expect(nativeTheme.themeSource).toBe("system");
-    });
-
-    it("broadcasts when macOS appearance changes while following the system", () => {
-      const { nativeTheme, windows, controller } = setup({ stored: "system" });
+    it("broadcasts when the Mac appearance changes while following the system", () => {
+      const { windows, controller, setSystemDark } = setup({ stored: "system" });
       controller.init();
 
-      nativeTheme.systemIsDark = true;
-      nativeTheme.emit("updated");
+      setSystemDark(true);
 
       expect(windows[0].webContents.send).toHaveBeenLastCalledWith("theme-changed", "dark");
       expect(windows[0].setBackgroundColor).toHaveBeenLastCalledWith("#121212");
     });
 
-    it("keeps an explicit preference when macOS appearance changes", () => {
-      const { nativeTheme, windows, controller } = setup({ stored: "light" });
+    it("keeps an explicit preference when the Mac appearance changes", () => {
+      const { windows, controller, setSystemDark } = setup({ stored: "light" });
       controller.init();
 
-      nativeTheme.systemIsDark = true;
-      nativeTheme.emit("updated");
+      setSystemDark(true);
 
       expect(windows[0].webContents.send).toHaveBeenLastCalledWith("theme-changed", "light");
     });
@@ -187,6 +240,12 @@ describe("createThemeController", () => {
       const { windows, controller } = setup();
       controller.init();
       expect(windows[0].webContents.send).not.toHaveBeenCalled();
+    });
+
+    it("resolves Follow System from the Mac, not from the pinned dark chrome", () => {
+      const { controller } = setup({ stored: "system", systemIsDark: false });
+      controller.init();
+      expect(controller.getEffectiveTheme()).toBe("light");
     });
   });
 
@@ -235,7 +294,7 @@ describe("createThemeController", () => {
 
   describe("setPreference", () => {
     it.each(["system", "light", "dark"])(
-      "persists %s, sets themeSource, rebuilds the menu and broadcasts",
+      "persists %s, keeps native chrome dark, rebuilds the menu and broadcasts",
       (preference) => {
         const { store, nativeTheme, rebuildMenu, windows, controller } = setup({
           systemIsDark: true,
@@ -245,7 +304,7 @@ describe("createThemeController", () => {
         expect(controller.setPreference(preference)).toBe(true);
 
         expect(store.set).toHaveBeenCalledWith("themePreference", preference);
-        expect(nativeTheme.themeSource).toBe(preference);
+        expect(nativeTheme.themeSource).toBe(NATIVE_CHROME_THEME);
         expect(rebuildMenu).toHaveBeenCalledTimes(1);
         expect(controller.getPreference()).toBe(preference);
         const expected = preference === "light" ? "light" : "dark";
@@ -282,7 +341,7 @@ describe("createThemeController", () => {
         expect(controller.setPreference(preference)).toBe(false);
 
         expect(store.set).not.toHaveBeenCalled();
-        expect(nativeTheme.themeSource).toBe("light");
+        expect(nativeTheme.themeSource).toBe(NATIVE_CHROME_THEME);
         expect(rebuildMenu).not.toHaveBeenCalled();
         expect(windows[0].webContents.send).not.toHaveBeenCalled();
         expect(console.error).toHaveBeenCalled();
