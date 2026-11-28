@@ -11,6 +11,16 @@
         margin: 0;
         overflow: hidden;
       }
+      /* follows nativeTheme.themeSource; matches the BrowserWindow backgroundColor until Excalidraw paints */
+      :root {
+        color-scheme: light dark;
+      }
+      @media (prefers-color-scheme: dark) {
+        html,
+        body {
+          background-color: #121212;
+        }
+      }
     </style>
     <script>
       // load fonts
