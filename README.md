@@ -68,6 +68,10 @@ sequenceDiagram
     Preload->>Main: invoke "write-file"
     Main->>FS: write .excalidraw file
 
+    App->>Preload: setCurrentFile(path | null)
+    Preload->>Main: send "set-current-file"
+    Main->>Main: window title + proxy icon
+
     Note over App: ⌘N (New) / ⌘O (Open)
     Main->>App: menu-new / menu-open event
     App->>App: save current file before switching
@@ -166,14 +170,37 @@ CI (`.github/workflows/ci.yml`) runs lint, format check, tests and the renderer 
 
 ### Menu Shortcuts
 
-| Shortcut | Action      |
-| -------- | ----------- |
-| ⌘N       | New drawing |
-| ⌘O       | Open file   |
-| ⌘S       | Save        |
-| ⌘⇧S      | Save As     |
+| Shortcut / Menu           | Action                                         |
+| ------------------------- | ---------------------------------------------- |
+| ⌘N                        | New drawing                                    |
+| ⌘O                        | Open file                                      |
+| File → Open Recent        | Reopen a recent drawing (with **Clear Menu**)  |
+| ⌘S                        | Save                                           |
+| ⌘⇧S                       | Save As                                        |
+| View → Appearance         | System / Light / Dark                          |
+| ⇧⌥D (Excalidraw shortcut) | Toggle light / dark (sets the Appearance menu) |
 
 The app also supports **file association** — double-clicking a `.excalidraw` file or using "Open With" will launch the app and load that file.
+
+### Window title and proxy icon
+
+The window title is the current file's name without its extension (`diagram.excalidraw` → "diagram"; only the last extension is dropped, so `a.b.excalidraw` → "a.b"), or "Untitled" when no file is open. On macOS the title also carries a proxy icon: drag it like the file, or ⌘-click the title for the folder path menu.
+
+The renderer's current file is the single source of truth: whenever it changes (startup load, ⌘N, ⌘O, Save As, Finder / Open Recent) the renderer sends `set-current-file` and the main process updates the title and represented filename. The renderer is the only side that knows a file actually loaded (a parse failure leaves the previous drawing in place), so the main process doesn't keep a second copy of this state. `index.html`'s `<title>` is ignored (`page-title-updated` is prevented).
+
+### Open Recent
+
+Every time a file becomes current through Open, Save As, Finder double-click / Open With, or Open Recent, the main process records it in one place: it saves `lastOpenedPath` and calls `app.addRecentDocument()`. macOS fills **File → Open Recent** (and the Dock menu's recent items) from that list. Choosing an item works whether a window is open (the file is handed to it, after saving the current drawing) or all windows are closed (a new window opens with that file).
+
+If a recent file was moved or deleted, the app shows an error ("… can't be opened") and leaves the current drawing untouched. Electron has no API to remove a single entry from the list; **Clear Menu** empties it.
+
+### Appearance (theme)
+
+**View → Appearance** offers **System** (default), **Light** and **Dark**. The choice is stored in electron-store as `themePreference` and also sets `nativeTheme.themeSource`, so native menus and dialogs match. With **System**, the app follows macOS appearance changes live.
+
+- Excalidraw's own theme toggle (main menu, or ⇧⌥D) stays visible. Using it sets the preference to that explicit theme (**Light** or **Dark**), and the Appearance menu updates to match. Choose **System** again to go back to following macOS.
+- `.excalidraw` files store `appState.theme`. It is still written when saving, so the file stays compatible with excalidraw.com, but it is **ignored when loading**: opening a file never changes the app's theme.
+- The window background matches the effective theme before the drawing loads, so there's no white flash on launch in dark mode.
 
 ## Known Limitations
 
