@@ -1,4 +1,5 @@
 const fs = require("fs");
+const { writeFileAtomic } = require("./atomicWrite");
 
 // --- Path Validation ---
 
@@ -6,12 +7,21 @@ const isAllowedPath = (filePath) => {
   return typeof filePath === "string" && filePath.endsWith(".excalidraw");
 };
 
+const fileExists = async (filePath) => {
+  try {
+    await fs.promises.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 // --- Config ---
 
 // read config from file
-const readConfig = (configPath) => {
+const readConfig = async (configPath) => {
   try {
-    const content = fs.readFileSync(configPath, "utf-8");
+    const content = await fs.promises.readFile(configPath, "utf-8");
     return JSON.parse(content);
   } catch (err) {
     console.error("[main] Failed to read config:", err);
@@ -22,28 +32,32 @@ const readConfig = (configPath) => {
 // --- Drawings ---
 
 // returns file content, or null if the path is disallowed, missing or unreadable
-const readDrawing = (filePath) => {
+const readDrawing = async (filePath) => {
+  if (!isAllowedPath(filePath)) {
+    console.error("[main] Rejected read for disallowed path:", filePath);
+    return null;
+  }
   try {
-    if (!isAllowedPath(filePath)) {
-      console.error("[main] Rejected read for disallowed path:", filePath);
-      return null;
-    }
-    if (!fs.existsSync(filePath)) return null;
-    return fs.readFileSync(filePath, "utf-8");
+    return await fs.promises.readFile(filePath, "utf-8");
   } catch (err) {
-    console.error("[main] Failed to read file:", filePath, err);
+    if (err.code !== "ENOENT") console.error("[main] Failed to read file:", filePath, err);
     return null;
   }
 };
 
-// returns true on success, false if the path is disallowed or the write fails
-const writeDrawing = (filePath, content) => {
+// every drawing write (auto-save, ⌘S, Save As, before switch/close) goes through here.
+// returns true on success, false if the path or content is rejected or the write fails
+const writeDrawing = async (filePath, content) => {
+  if (!isAllowedPath(filePath)) {
+    console.error("[main] Rejected write for disallowed path:", filePath);
+    return false;
+  }
+  if (typeof content !== "string") {
+    console.error("[main] Rejected write with non-string content:", filePath);
+    return false;
+  }
   try {
-    if (!isAllowedPath(filePath)) {
-      console.error("[main] Rejected write for disallowed path:", filePath);
-      return false;
-    }
-    fs.writeFileSync(filePath, content, "utf-8");
+    await writeFileAtomic(filePath, content);
     return true;
   } catch (err) {
     console.error("[main] Failed to write file:", filePath, err);
@@ -51,4 +65,4 @@ const writeDrawing = (filePath, content) => {
   }
 };
 
-module.exports = { isAllowedPath, readConfig, readDrawing, writeDrawing };
+module.exports = { isAllowedPath, fileExists, readConfig, readDrawing, writeDrawing };
