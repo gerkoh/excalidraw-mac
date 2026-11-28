@@ -4,7 +4,7 @@ A desktop application for [Excalidraw](https://excalidraw.com/), which auto-save
 
 ## Getting Started
 
-Requires Node.js 22.12 or newer. Electron 45 and `electron-store` 12 both require it.
+Requires Node.js 24.15 or newer (see `.nvmrc`). Node 24 matches the Node bundled in Electron 45, so CI tests the main-process code on the same major version the app runs on. When upgrading Electron to a release with a newer bundled Node, bump `.nvmrc` and `engines` in `package.json` together.
 
 1. Install dependencies.
 2. Set your preferences in `config.json` (window size, auto-save timing, default open directory).
