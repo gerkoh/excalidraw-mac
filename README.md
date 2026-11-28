@@ -12,7 +12,7 @@ Requires Node.js 22.12 or newer. Electron 45 and `electron-store` 12 both requir
 
 ```bash
 npm install
-npm run compile   # lint -> format -> build -> package DMG
+npm run compile   # lint -> test -> format -> build -> package DMG
 ```
 
 4. Open the DMG in `dist/` and drag **excalidraw-mac** into Applications. Spotlight lists apps from there; search for `excalidraw-mac`.
@@ -89,11 +89,23 @@ sequenceDiagram
 
 ```
 
+### Module Layout
+
+| Path                                     | Process  | Role                                                                                             |
+| ---------------------------------------- | -------- | ------------------------------------------------------------------------------------------------ |
+| `main.js`                                | main     | Wiring only: IPC handlers, window + close handshake, menu, OS `open-file`                        |
+| `electron/fileService.js`                | main     | Path validation, config reading, reading and writing `.excalidraw` files                         |
+| `electron/menu.js`                       | main     | Builds the application menu template (Electron calls are passed in)                              |
+| `preload.js`                             | preload  | Exposes `window.electronAPI`; self-contained since sandboxed preload can't `require` local files |
+| `excalidraw-app/src/App.jsx`             | renderer | Mounts Excalidraw and wires the hooks                                                            |
+| `excalidraw-app/src/hooks/`              | renderer | `useFileOperations` (startup load, menu + OS events) and `useAutoSave`                           |
+| `excalidraw-app/src/utils/sceneUtils.js` | renderer | Parse, load and serialize scenes (including the viewport, see #3 below)                          |
+
 ## Design Considerations
 
 ### #1 Why CommonJS?
 
-Electron's sandboxed preload scripts [don't support ESM](https://www.electronjs.org/docs/latest/tutorial/esm#sandboxed-preload-scripts-cant-use-esm-imports), so `preload.js` and `main.js` must use `require()`. This is why `package.json` sets `"type": "commonjs"`. The renderer files under `excalidraw-app/src/` still use ESM `import`/`export` — Vite handles those, not Node.js.
+Electron's sandboxed preload scripts [don't support ESM](https://www.electronjs.org/docs/latest/tutorial/esm#sandboxed-preload-scripts-cant-use-esm-imports), so `preload.js`, `main.js` and the main-process modules in `electron/` must use `require()`. This is why `package.json` sets `"type": "commonjs"`. The renderer files under `excalidraw-app/src/` still use ESM `import`/`export` — Vite handles those, not Node.js.
 
 [`electron-store`](https://github.com/sindresorhus/electron-store) v12 is ESM-only and requires Node.js 22 or newer (and Electron 30 or newer). Electron 45 bundles Node.js 24, so `main.js` loads it with `require()` and takes the default export. That stays on the CommonJS loader, which still resolves inside a packaged asar. Dynamic `import()` is not used for this module, because that loader does not resolve packages inside asar archives.
 
@@ -101,7 +113,7 @@ Electron's sandboxed preload scripts [don't support ESM](https://www.electronjs.
 
 - `fileHandle.createWritable()` is a browser [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/FileSystemWritableFileStream) — it runs in the renderer, which is sandboxed and shouldn't own filesystem operations
 - `FileSystemFileHandle` objects can't be sent across the IPC boundary (not serializable)
-- `fs.writeFileSync` runs in the **main process** (privileged), following Electron's security model: renderer requests → main process executes
+- `fs.writeFileSync` runs in the **main process** (privileged, in `electron/fileService.js`), following Electron's security model: renderer requests → main process executes
 - Content is serialized via Excalidraw's `serializeAsJSON()` which outputs the standard `.excalidraw` JSON format
 
 ### #3 Why is viewport state (scroll/zoom) re-injected after serialization?
@@ -129,14 +141,28 @@ If no file is open, the app will prompt you to save when you make changes.
 
 ### Scripts
 
-| Command           | Description                                       |
-| ----------------- | ------------------------------------------------- |
-| `npm start`       | Launch the Electron app (requires a prior build)  |
-| `npm run build`   | Build the renderer app for production             |
-| `npm run dmg`     | Package the app into a DMG using electron-builder |
-| `npm run compile` | Lint → Format → Build → Package DMG               |
-| `npm run lint`    | Run ESLint                                        |
-| `npm run format`  | Run Prettier                                      |
+| Command                | Description                                       |
+| ---------------------- | ------------------------------------------------- |
+| `npm start`            | Launch the Electron app (requires a prior build)  |
+| `npm run build`        | Build the renderer app for production             |
+| `npm run dmg`          | Package the app into a DMG using electron-builder |
+| `npm run compile`      | Lint → Test → Format → Build → Package DMG        |
+| `npm run lint`         | Run ESLint                                        |
+| `npm run format`       | Run Prettier                                      |
+| `npm run format:check` | Check formatting without writing (used in CI)     |
+| `npm test`             | Run the unit tests once                           |
+| `npm run test:watch`   | Run the unit tests in watch mode                  |
+
+### Testing
+
+Unit tests use [Vitest](https://vitest.dev/) and sit next to the code they cover as `*.test.js`. `vitest.config.mjs` splits them into two projects:
+
+- **main** (Node): `preload.test.js` and `electron/**/*.test.js`. These load the CommonJS modules with `createRequire`. The preload test swaps a fake `electron` into Node's require cache, because `vi.mock` can't intercept a CommonJS `require`.
+- **renderer** (jsdom): `excalidraw-app/src/**/*.test.js`. Hooks are tested with `@testing-library/react` and a mocked `window.electronAPI`. The real `@excalidraw/excalidraw` is used; `excalidraw-app/src/test/setup.js` stubs the canvas context it touches on import.
+
+Tests never launch Electron or touch your real drawings or electron-store. File I/O tests write to a temp directory.
+
+CI (`.github/workflows/ci.yml`) runs lint, format check, tests and the renderer build on every pull request and on pushes to `main`. Renovate only automerges once that check is green.
 
 ### Menu Shortcuts
 
