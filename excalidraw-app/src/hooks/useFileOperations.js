@@ -1,26 +1,20 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { parseInitialData, loadScene } from "../utils/sceneUtils";
 
-const useFileOperations = ({
-  excalidrawAPI,
-  sceneElementsRef,
-  appStateRef,
-  getSerializedScene,
-}) => {
-  // current file path is stored in this hook and passed to App.jsx -> useAutoSave
-  const [currentFilePath, setCurrentFilePath] = useState(null);
-  const currentFilePathRef = useRef(currentFilePath);
-
+// saver is the save controller from useAutoSave; it owns the current file path and dirty state,
+// and saver.save() is the one way this hook writes the current file
+const useFileOperations = ({ excalidrawAPI, sceneElementsRef, appStateRef, saver }) => {
   // on first render: Don't render Excalidraw until we know whether there's saved data
   const [initialData, setInitialData] = useState(undefined);
 
-  // keep ref in sync with state so IPC handlers always read the latest path
-  useEffect(() => {
-    currentFilePathRef.current = currentFilePath;
-  }, [currentFilePath]);
-
   // loading initial data on startup
   useEffect(() => {
+    // startDocument before Excalidraw renders the data, so the initial load isn't an edit
+    const showInitialData = (filePath, data) => {
+      saver.startDocument(filePath);
+      setInitialData(data);
+    };
+
     const loadInitialData = async () => {
       try {
         // check if a file was requested via OS (double-click / Open With)
@@ -33,61 +27,48 @@ const useFileOperations = ({
           if (content) {
             const data = parseInitialData(content);
             if (data) {
-              setCurrentFilePath(targetPath);
-              setInitialData(data);
+              showInitialData(targetPath, data);
             } else {
               console.error("[useFileOperations] Failed to parse file on startup:", targetPath);
-              setInitialData(null);
+              showInitialData(null, null);
             }
           } else {
             console.error("[useFileOperations] Failed to read file on startup:", targetPath);
-            setInitialData(null); // render empty canvas if file read fails
+            showInitialData(null, null); // render empty canvas if file read fails
           }
         } else {
-          setInitialData(null); // no file to open, render empty canvas
+          showInitialData(null, null); // no file to open, render empty canvas
         }
       } catch (err) {
         console.error("[useFileOperations] Error loading initial file:", err);
-        setInitialData(null); // render empty canvas on error
+        showInitialData(null, null); // render empty canvas on error
       }
     };
     loadInitialData();
-  }, []);
+  }, [saver]);
 
   useEffect(() => {
     if (!excalidrawAPI) return;
 
-    // serialize the scene and write it to the current file; resolves to writeFile's result
-    const writeCurrentFile = async () => {
-      const content = getSerializedScene();
-      return window.electronAPI.writeFile(currentFilePathRef.current, content);
-    };
-
-    // parse file content and swap it into the canvas; returns false if content is malformed
+    // parse file content and swap it into the canvas; returns false if content is malformed.
+    // startDocument first so the load itself isn't seen as an edit
     const loadFileContent = (filePath, content) => {
       const data = parseInitialData(content);
       if (!data) return false;
+      saver.startDocument(filePath);
       loadScene(excalidrawAPI, data);
-      setCurrentFilePath(filePath);
       return true;
     };
 
-    // Save the current file before switching to a new one
-    const saveCurrentFile = async () => {
-      if (!currentFilePathRef.current) return;
-      await writeCurrentFile();
-      console.log("[useFileOperations] Saved before switching:", currentFilePathRef.current);
-    };
-
-    // ⌘N - new file
+    // ⌘N - new file (main has already handled unsaved changes of an untitled drawing)
     const handleNew = async () => {
       console.log("[useFileOperations] ⌘N New file operation triggered");
-      await saveCurrentFile();
-      excalidrawAPI.resetScene();
+      await saver.save();
+      saver.startDocument(null);
+      // cleared before resetScene so its onChange repopulates them with the empty scene
       sceneElementsRef.current = null;
       appStateRef.current = null;
-      setCurrentFilePath(null);
-      currentFilePathRef.current = null;
+      excalidrawAPI.resetScene();
       console.log("[useFileOperations] State reset");
     };
 
@@ -97,39 +78,35 @@ const useFileOperations = ({
       const result = await window.electronAPI.openFileDialog();
       if (!result) return; // user cancelled
 
-      await saveCurrentFile();
+      await saver.save();
       if (!loadFileContent(result.path, result.content)) return;
       console.log("[useFileOperations] Opened file and loaded data:", result.path);
     };
 
-    // ⇧⌘S - save as
+    // ⇧⌘S - save as; resolves the new path, or null if cancelled / failed
     const handleSaveAs = async () => {
       console.log("[useFileOperations] ⇧⌘S Save As operation triggered");
-      const content = getSerializedScene();
-      const newPath = await window.electronAPI.saveFileDialog(content);
-      if (newPath) {
-        console.log("[useFileOperations] Saved in new file:", newPath);
-        setCurrentFilePath(newPath);
-      }
+      const newPath = await saver.saveAs();
+      if (newPath) console.log("[useFileOperations] Saved in new file:", newPath);
+      return newPath;
     };
 
     // ⌘S - save
     const handleSave = async () => {
       console.log("[useFileOperations] ⌘S Save operation triggered");
       // if no file is open yet, trigger "Save As"
-      if (!currentFilePathRef.current) {
+      if (!saver.getState().hasFilePath) {
         console.log("[useFileOperations] No current file, triggering 'Save As'");
         return handleSaveAs();
       }
-      const success = await writeCurrentFile();
-      if (success) {
-        console.log("[useFileOperations] Saved to existing file:", currentFilePathRef.current);
+      if (await saver.save()) {
+        console.log("[useFileOperations] Saved to existing file:", saver.getState().filePath);
       }
     };
 
     // OS-level open-file (double-click / Open With)
     const handleOpenFileFromOS = async (_event, filePath) => {
-      await saveCurrentFile();
+      await saver.save();
       const content = await window.electronAPI.readFile(filePath);
       if (!content) {
         console.error("[useFileOperations] Failed to read file from OS:", filePath);
@@ -139,13 +116,24 @@ const useFileOperations = ({
       console.log("[useFileOperations] Opened file from OS and loaded data:", filePath);
     };
 
-    // Final save before window closes (Cmd+Q, Cmd+W, close button)
-    const handleBeforeClose = async () => {
-      if (currentFilePathRef.current) {
-        console.log("[useFileOperations] Before-close: saving to", currentFilePathRef.current);
-        await writeCurrentFile();
+    // main asks for Save As after the user chose "Save" in the unsaved-changes prompt;
+    // it always gets an answer, or the close / switch would wait forever
+    const handleSaveAsRequest = async () => {
+      let saved = false;
+      try {
+        saved = (await handleSaveAs()) !== null;
+      } finally {
+        window.electronAPI.sendSaveAsResult(saved);
       }
-      window.electronAPI.acknowledgeClose();
+    };
+
+    // Final save before window closes (Cmd+Q, Cmd+W, close button); persists the viewport too
+    const handleBeforeClose = async () => {
+      try {
+        await saver.save();
+      } finally {
+        window.electronAPI.acknowledgeClose();
+      }
     };
 
     const unsubs = [
@@ -154,14 +142,15 @@ const useFileOperations = ({
       window.electronAPI.onMenuSave(handleSave),
       window.electronAPI.onMenuSaveAs(handleSaveAs),
       window.electronAPI.onOpenFile(handleOpenFileFromOS),
+      window.electronAPI.onSaveAsRequest(handleSaveAsRequest),
       window.electronAPI.onBeforeClose(handleBeforeClose),
     ];
 
     return () => unsubs.forEach((unsub) => unsub());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [excalidrawAPI]);
+  }, [excalidrawAPI, saver]);
 
-  return { currentFilePath, initialData };
+  return { initialData };
 };
 
 export default useFileOperations;

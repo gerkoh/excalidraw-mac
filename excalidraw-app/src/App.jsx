@@ -4,9 +4,8 @@ import "@excalidraw/excalidraw/index.css";
 import { useState, useRef, useCallback, useEffect } from "react";
 import useAutoSave from "./hooks/useAutoSave";
 import useFileOperations from "./hooks/useFileOperations";
-import useReportCurrentFile from "./hooks/useReportCurrentFile";
 import useTheme from "./hooks/useTheme";
-import { serializeScene } from "./utils/sceneUtils";
+import { getSceneSnapshot, serializeScene } from "./utils/sceneUtils";
 
 export default function App() {
   // on startup, we load config and check if there's a file to open (pending from OS or last opened)
@@ -33,33 +32,32 @@ export default function App() {
     [excalidrawAPI],
   );
 
+  // single save pipeline: debounced auto-save, dirty state, ⌘S / switch / close saves
+  const saver = useAutoSave({ config, getSerializedScene });
+
   // handle menu events (New, Open, Save, Save As)
   // handle file open from finder
-  const { currentFilePath, initialData } = useFileOperations({
+  const { initialData } = useFileOperations({
     excalidrawAPI,
     sceneElementsRef,
     appStateRef,
-    getSerializedScene,
+    saver,
   });
-
-  // auto-save writes to the current file path (inactive until a file is opened/saved)
-  useAutoSave({ sceneElementsRef, currentFilePath, config, excalidrawAPI, getSerializedScene });
-
-  // window title + proxy icon follow the current file
-  useReportCurrentFile({ currentFilePath, isReady: initialData !== undefined });
 
   // effective theme from View -> Appearance; the in-app toggle sets an explicit Light/Dark preference
   const { theme, handleAppThemeChange } = useTheme();
 
   // Excalidraw fires onChange on every interaction
-  // capture latest scene elements and app state for save operations
+  // capture latest scene elements and app state for save operations, feed the auto-saver,
+  // and follow the in-app theme toggle
   const handleChange = useCallback(
     (sceneElements, appState) => {
       appStateRef.current = appState;
       sceneElementsRef.current = sceneElements;
+      saver.observe(getSceneSnapshot(sceneElements, appState));
       handleAppThemeChange(appState.theme);
     },
-    [handleAppThemeChange],
+    [saver, handleAppThemeChange],
   );
 
   // Block rendering until startup file check and theme resolve:

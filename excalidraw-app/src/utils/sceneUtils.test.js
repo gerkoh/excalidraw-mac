@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { stripAppLevelAppState, parseInitialData, loadScene, serializeScene } from "./sceneUtils";
+import { serializeAsJSON } from "@excalidraw/excalidraw";
+import {
+  stripAppLevelAppState,
+  parseInitialData,
+  loadScene,
+  getSceneSnapshot,
+  serializeScene,
+  injectViewport,
+} from "./sceneUtils";
 
 const rectangle = {
   id: "rect-1",
@@ -39,7 +47,17 @@ const createExcalidrawAPI = (files = {}) => ({
   updateScene: vi.fn(),
   addFiles: vi.fn(),
   getFiles: vi.fn(() => files),
+  history: { clear: vi.fn() },
 });
+
+// what serializeScene did before the single-pass splice: parse, re-inject, re-stringify
+const legacySerializeScene = (elements, appState, files) => {
+  const data = JSON.parse(serializeAsJSON(elements, appState, files, "local"));
+  data.appState.scrollX = appState.scrollX ?? 0;
+  data.appState.scrollY = appState.scrollY ?? 0;
+  data.appState.zoom = appState.zoom ?? { value: 1 };
+  return data;
+};
 
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -188,6 +206,118 @@ describe("loadScene", () => {
     loadScene(api, data);
     expect(api.updateScene).toHaveBeenCalledWith({ elements: [rectangle], appState: {} });
     expect(api.addFiles).toHaveBeenCalledWith([{ ...imageFile, id: "f1" }]);
+  });
+
+  it("clears undo history so undo can't bring back the previous drawing", () => {
+    const api = createExcalidrawAPI();
+    loadScene(api, { elements: [rectangle], appState: {}, files: { f1: imageFile } });
+    expect(api.history.clear).toHaveBeenCalledTimes(1);
+    expect(api.history.clear.mock.invocationCallOrder[0]).toBeGreaterThan(
+      api.updateScene.mock.invocationCallOrder[0],
+    );
+    expect(api.history.clear.mock.invocationCallOrder[0]).toBeGreaterThan(
+      api.addFiles.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("clears undo history even for an empty drawing", () => {
+    const api = createExcalidrawAPI();
+    loadScene(api, {});
+    expect(api.history.clear).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("getSceneSnapshot", () => {
+  const edited = (element, changes = {}) => ({
+    ...element,
+    version: element.version + 1,
+    versionNonce: element.versionNonce + 1,
+    ...changes,
+  });
+
+  it("is stable for the same elements and appState", () => {
+    const appState = { viewBackgroundColor: "#fff" };
+    expect(getSceneSnapshot([rectangle], appState)).toEqual(
+      getSceneSnapshot([{ ...rectangle }], { ...appState }),
+    );
+  });
+
+  it("ignores the theme (it isn't saved into the file, so toggling it must not dirty the drawing)", () => {
+    expect(getSceneSnapshot([rectangle], { theme: "dark" })).toEqual(
+      getSceneSnapshot([rectangle], { theme: "light" }),
+    );
+  });
+
+  it("changes when an element is edited (new versionNonce)", () => {
+    const before = getSceneSnapshot([rectangle], {});
+    const after = getSceneSnapshot([edited(rectangle, { x: 99 })], {});
+    expect(after.key).not.toBe(before.key);
+  });
+
+  it("changes when an element is deleted (deletion bumps the version)", () => {
+    const before = getSceneSnapshot([rectangle], {});
+    const after = getSceneSnapshot([edited(rectangle, { isDeleted: true })], {});
+    expect(after.key).not.toBe(before.key);
+  });
+
+  it("changes when an element is added or removed", () => {
+    const one = getSceneSnapshot([rectangle], {});
+    const two = getSceneSnapshot([rectangle, { ...rectangle, id: "r2", versionNonce: 7 }], {});
+    expect(two.key).not.toBe(one.key);
+    expect(getSceneSnapshot([], {}).key).not.toBe(one.key);
+  });
+
+  it.each([
+    ["viewBackgroundColor", { viewBackgroundColor: "#000" }],
+    ["gridSize", { gridSize: 40 }],
+    ["gridStep", { gridStep: 10 }],
+    ["gridModeEnabled", { gridModeEnabled: true }],
+  ])("changes when persisted appState %s changes", (_label, change) => {
+    const base = {
+      viewBackgroundColor: "#fff",
+      gridSize: 20,
+      gridStep: 5,
+      gridModeEnabled: false,
+    };
+    expect(getSceneSnapshot([rectangle], { ...base, ...change }).key).not.toBe(
+      getSceneSnapshot([rectangle], base).key,
+    );
+  });
+
+  it.each([
+    ["scrolling", { scrollX: 500, scrollY: -200 }],
+    ["zooming", { zoom: { value: 3 } }],
+    ["selecting", { selectedElementIds: { "rect-1": true } }],
+    ["changing tool", { activeTool: { type: "arrow" } }],
+    ["changing theme", { theme: "dark" }],
+  ])("ignores %s (not an edit to the drawing)", (_label, change) => {
+    const base = { scrollX: 0, scrollY: 0, zoom: { value: 1 }, viewBackgroundColor: "#fff" };
+    expect(getSceneSnapshot([rectangle], { ...base, ...change }).key).toBe(
+      getSceneSnapshot([rectangle], base).key,
+    );
+  });
+
+  it.each([
+    ["no elements", [], false],
+    ["only deleted elements", [{ ...rectangle, isDeleted: true }], false],
+    ["one live element", [rectangle], true],
+    [
+      "a mix of deleted and live",
+      [
+        { ...rectangle, isDeleted: true },
+        { ...rectangle, id: "r2" },
+      ],
+      true,
+    ],
+  ])("hasContent is right for %s", (_label, elements, hasContent) => {
+    expect(getSceneSnapshot(elements, {}).hasContent).toBe(hasContent);
+  });
+
+  it("handles null elements and appState", () => {
+    expect(getSceneSnapshot(null, null)).toEqual({
+      key: getSceneSnapshot([], {}).key,
+      hasContent: false,
+    });
   });
 });
 
@@ -360,5 +490,151 @@ describe("app-level theme is never taken from a file", () => {
     const data = parseInitialData(content);
     expect(data.appState).not.toHaveProperty("theme");
     expect(data.appState.scrollX).toBe(3);
+  });
+});
+
+describe("serializeScene single pass", () => {
+  const image = { ...rectangle, id: "img-1", type: "image", fileId: "f1", status: "saved" };
+  const files = { f1: { ...imageFile, id: "f1" } };
+
+  const cases = [
+    ["empty scene, empty appState", [], {}, {}],
+    ["one element, viewport only", [rectangle], { scrollX: 3, scrollY: 4, zoom: { value: 2 } }, {}],
+    [
+      "persisted appState and an image",
+      [rectangle, image],
+      {
+        scrollX: -1.5,
+        scrollY: 2.25,
+        zoom: { value: 0.3 },
+        viewBackgroundColor: "#abc",
+        gridSize: 20,
+      },
+      files,
+    ],
+    ["missing viewport fields", [rectangle], { viewBackgroundColor: "#fff" }, {}],
+  ];
+
+  it.each(cases)(
+    "matches the old parse/re-stringify output for %s",
+    (_l, elements, appState, f) => {
+      const output = serializeScene(
+        { current: elements },
+        { current: appState },
+        createExcalidrawAPI(f),
+      );
+      expect(JSON.parse(output)).toEqual(legacySerializeScene(elements, appState, f));
+    },
+  );
+
+  it.each(cases)("is canonical 2-space JSON for %s", (_l, elements, appState, f) => {
+    const output = serializeScene(
+      { current: elements },
+      { current: appState },
+      createExcalidrawAPI(f),
+    );
+    expect(output).toBe(JSON.stringify(JSON.parse(output), null, 2));
+  });
+
+  it("does not parse the serialized scene", () => {
+    const parse = vi.spyOn(JSON, "parse");
+    serializeScene(
+      { current: [rectangle, image] },
+      { current: { scrollX: 1, scrollY: 2, zoom: { value: 1 } } },
+      createExcalidrawAPI(files),
+    );
+    expect(parse).not.toHaveBeenCalled();
+  });
+
+  it("is not fooled by element text that looks like the appState key", () => {
+    const tricky = ['\n  "appState": {', '"appState": {}', '  "appState": {\n    "scrollX": 999,'];
+    const elements = tricky.map((text, i) => ({
+      ...rectangle,
+      id: `text-${i}`,
+      type: "text",
+      text,
+      originalText: text,
+    }));
+    const appState = { scrollX: 7, scrollY: 8, zoom: { value: 1.25 }, viewBackgroundColor: "#fff" };
+
+    const data = JSON.parse(
+      serializeScene({ current: elements }, { current: appState }, createExcalidrawAPI()),
+    );
+
+    expect(data.elements.map((element) => element.text)).toEqual(tricky);
+    expect(data.appState).toEqual({
+      scrollX: 7,
+      scrollY: 8,
+      zoom: { value: 1.25 },
+      viewBackgroundColor: "#fff",
+    });
+  });
+
+  it("keeps a valid .excalidraw envelope that excalidraw.com accepts", () => {
+    const data = JSON.parse(
+      serializeScene({ current: [image] }, { current: { scrollX: 1 } }, createExcalidrawAPI(files)),
+    );
+    expect(Object.keys(data)).toEqual([
+      "type",
+      "version",
+      "source",
+      "elements",
+      "appState",
+      "files",
+    ]);
+    expect(data.type).toBe("excalidraw");
+    expect(data.version).toBe(2);
+    expect(data.files.f1.dataURL).toBe(imageFile.dataURL);
+  });
+
+  it("relies on serializeAsJSON still stripping the viewport (library contract)", () => {
+    const raw = JSON.parse(
+      serializeAsJSON([rectangle], { scrollX: 1, scrollY: 2, zoom: { value: 3 } }, {}, "local"),
+    );
+    expect(raw.appState).not.toHaveProperty("scrollX");
+    expect(raw.appState).not.toHaveProperty("scrollY");
+    expect(raw.appState).not.toHaveProperty("zoom");
+  });
+
+  it("drops files only referenced by deleted elements, like the deleted elements themselves", () => {
+    const deletedImage = { ...image, isDeleted: true };
+    const data = JSON.parse(
+      serializeScene({ current: [deletedImage] }, { current: {} }, createExcalidrawAPI(files)),
+    );
+    expect(data.elements).toEqual([]);
+    expect(data.files).toEqual({});
+  });
+});
+
+describe("injectViewport", () => {
+  const viewport = { scrollX: 1, scrollY: 2, zoom: { value: 3 } };
+
+  it("adds the viewport to a non-empty appState", () => {
+    const serialized = JSON.stringify({ type: "excalidraw", appState: { gridSize: 20 } }, null, 2);
+    const output = injectViewport(serialized, viewport);
+    expect(JSON.parse(output).appState).toEqual({ ...viewport, gridSize: 20 });
+    expect(output).toBe(JSON.stringify(JSON.parse(output), null, 2));
+  });
+
+  it("adds the viewport to an empty appState", () => {
+    const serialized = JSON.stringify({ type: "excalidraw", appState: {}, files: {} }, null, 2);
+    const output = injectViewport(serialized, viewport);
+    expect(JSON.parse(output).appState).toEqual(viewport);
+    expect(output).toBe(JSON.stringify(JSON.parse(output), null, 2));
+  });
+
+  it("falls back to re-parsing (and warns) if the format is not what serializeAsJSON produces", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const compact = JSON.stringify({ type: "excalidraw", appState: { gridSize: 20 } });
+    const output = injectViewport(compact, viewport);
+    expect(JSON.parse(output).appState).toEqual({ gridSize: 20, ...viewport });
+    expect(output).toBe(JSON.stringify(JSON.parse(output), null, 2));
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back when there is no appState at all", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const output = injectViewport(JSON.stringify({ type: "excalidraw" }, null, 2), viewport);
+    expect(JSON.parse(output).appState).toEqual(viewport);
   });
 });
