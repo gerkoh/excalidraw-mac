@@ -60,6 +60,20 @@ export default [
     },
   },
 
+  // Code shared by main and renderer (plain ESM, only globals both environments have)
+  {
+    files: ["shared/**/*.mjs"],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
+      globals: {
+        URL: "readonly",
+        URLSearchParams: "readonly",
+        decodeURIComponent: "readonly",
+      },
+    },
+  },
+
   // Vite + Vitest config (ESM, Node)
   {
     files: ["vite.config.mjs", "vitest.config.mjs"],
