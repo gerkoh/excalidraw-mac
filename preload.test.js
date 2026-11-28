@@ -65,6 +65,10 @@ describe("preload", () => {
         "onMenuSave",
         "onMenuSaveAs",
         "onOpenFile",
+        "setCurrentFile",
+        "getTheme",
+        "setThemePreference",
+        "onThemeChanged",
         "onBeforeClose",
         "acknowledgeClose",
       ].sort(),
@@ -88,6 +92,7 @@ describe("preload", () => {
       ["getPendingFile", [], ["get-pending-file"]],
       ["openFileDialog", [], ["open-file-dialog"]],
       ["saveFileDialog", ["{}"], ["save-file-dialog", "{}"]],
+      ["getTheme", [], ["get-theme"]],
     ])("%s invokes the right channel with its args", async (method, args, expected) => {
       loadPreload();
       await expect(api[method](...args)).resolves.toBe("invoke-result");
@@ -99,8 +104,10 @@ describe("preload", () => {
       loadPreload();
       api.getConfig("unexpected");
       api.getLastPath("unexpected");
+      api.getTheme("unexpected");
       expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(1, "get-config");
       expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(2, "get-last-path");
+      expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(3, "get-theme");
     });
 
     it("acknowledgeClose sends (not invokes) close-acknowledged", () => {
@@ -111,6 +118,27 @@ describe("preload", () => {
     });
   });
 
+  describe("send methods", () => {
+    it.each([
+      ["setCurrentFile", ["/a.excalidraw"], ["set-current-file", "/a.excalidraw"]],
+      ["setCurrentFile", [null], ["set-current-file", null]],
+      ["setThemePreference", ["dark"], ["set-theme-preference", "dark"]],
+      ["setThemePreference", ["system"], ["set-theme-preference", "system"]],
+    ])("%s(%j) sends (not invokes) the right channel", (method, args, expected) => {
+      loadPreload();
+      expect(api[method](...args)).toBeUndefined();
+      expect(ipcRenderer.send).toHaveBeenCalledTimes(1);
+      expect(ipcRenderer.send).toHaveBeenCalledWith(...expected);
+      expect(ipcRenderer.invoke).not.toHaveBeenCalled();
+    });
+
+    it("setCurrentFile forwards exactly one argument", () => {
+      loadPreload();
+      api.setCurrentFile("/a.excalidraw", "extra");
+      expect(ipcRenderer.send).toHaveBeenCalledWith("set-current-file", "/a.excalidraw");
+    });
+  });
+
   describe("event listeners", () => {
     const listeners = [
       ["onMenuNew", "menu-new"],
@@ -118,6 +146,7 @@ describe("preload", () => {
       ["onMenuSave", "menu-save"],
       ["onMenuSaveAs", "menu-save-as"],
       ["onOpenFile", "open-file"],
+      ["onThemeChanged", "theme-changed"],
       ["onBeforeClose", "before-close"],
     ];
 

@@ -6,17 +6,30 @@ const { buildMenuTemplate } = require("./menu");
 
 const createFakeWindow = () => ({ webContents: { send: vi.fn() } });
 
-const setup = ({ focusedWindow = createFakeWindow() } = {}) => {
+const setup = ({ focusedWindow = createFakeWindow(), themePreference = "system" } = {}) => {
   const getFocusedWindow = vi.fn(() => focusedWindow);
   const clearLastOpenedPath = vi.fn();
+  const setThemePreference = vi.fn();
   const template = buildMenuTemplate({
     appName: "excalidraw-mac",
     getFocusedWindow,
     clearLastOpenedPath,
+    themePreference,
+    setThemePreference,
   });
   const findMenu = (label) => template.find((menu) => menu.label === label);
   const findFileItem = (label) => findMenu("File").submenu.find((item) => item.label === label);
-  return { template, focusedWindow, getFocusedWindow, clearLastOpenedPath, findMenu, findFileItem };
+  const findViewItem = (label) => findMenu("View").submenu.find((item) => item.label === label);
+  return {
+    template,
+    focusedWindow,
+    getFocusedWindow,
+    clearLastOpenedPath,
+    setThemePreference,
+    findMenu,
+    findFileItem,
+    findViewItem,
+  };
 };
 
 describe("buildMenuTemplate", () => {
@@ -41,18 +54,21 @@ describe("buildMenuTemplate", () => {
   });
 
   it("does not touch the window or store while building", () => {
-    const { getFocusedWindow, clearLastOpenedPath, focusedWindow } = setup();
+    const { getFocusedWindow, clearLastOpenedPath, setThemePreference, focusedWindow } = setup();
     expect(getFocusedWindow).not.toHaveBeenCalled();
     expect(clearLastOpenedPath).not.toHaveBeenCalled();
+    expect(setThemePreference).not.toHaveBeenCalled();
     expect(focusedWindow.webContents.send).not.toHaveBeenCalled();
   });
 
-  it("has New, separator, Open…, Save, Save As… in the File menu", () => {
+  it("has New, separator, Open…, Open Recent, separator, Save, Save As… in the File menu", () => {
     const { findMenu } = setup();
     expect(findMenu("File").submenu.map((item) => item.label ?? item.type)).toEqual([
       "New",
       "separator",
       "Open…",
+      "Open Recent",
+      "separator",
       "Save",
       "Save As…",
     ]);
@@ -136,5 +152,94 @@ describe("buildMenuTemplate", () => {
       "togglefullscreen",
     ]);
     expect(roles(findMenu("Window"))).toEqual(["minimize", "zoom", "close"]);
+  });
+
+  describe("File -> Open Recent", () => {
+    it("uses the macOS recentDocuments role so the OS fills it", () => {
+      const { findFileItem } = setup();
+      const openRecent = findFileItem("Open Recent");
+      expect(openRecent.role).toBe("recentDocuments");
+      expect(openRecent.click).toBeUndefined();
+    });
+
+    it("has only a Clear Menu item using the clearRecentDocuments role", () => {
+      const { findFileItem } = setup();
+      expect(findFileItem("Open Recent").submenu).toEqual([
+        { label: "Clear Menu", role: "clearRecentDocuments" },
+      ]);
+    });
+
+    it("sits directly after Open…", () => {
+      const { findMenu } = setup();
+      const labels = findMenu("File").submenu.map((item) => item.label);
+      expect(labels.indexOf("Open Recent")).toBe(labels.indexOf("Open…") + 1);
+    });
+  });
+
+  describe("View -> Appearance", () => {
+    it("sits between Reset Zoom and Toggle Full Screen, fenced by separators", () => {
+      const { findMenu } = setup();
+      const items = findMenu("View").submenu.map((item) => item.role ?? item.label ?? item.type);
+      expect(items.slice(items.indexOf("resetZoom"))).toEqual([
+        "resetZoom",
+        "separator",
+        "Appearance",
+        "separator",
+        "togglefullscreen",
+      ]);
+    });
+
+    it("offers System, Light and Dark as radio items", () => {
+      const { findViewItem } = setup();
+      const items = findViewItem("Appearance").submenu;
+      expect(items.map((item) => item.label)).toEqual(["System", "Light", "Dark"]);
+      items.forEach((item) => expect(item.type).toBe("radio"));
+    });
+
+    it.each([
+      ["system", "System"],
+      ["light", "Light"],
+      ["dark", "Dark"],
+    ])("checks only the %s item for that preference", (themePreference, checkedLabel) => {
+      const { findViewItem } = setup({ themePreference });
+      const checked = findViewItem("Appearance")
+        .submenu.filter((item) => item.checked)
+        .map((item) => item.label);
+      expect(checked).toEqual([checkedLabel]);
+    });
+
+    it.each([undefined, null, "sepia", ""])(
+      "checks System for an unknown preference (%j)",
+      (themePreference) => {
+        const { findViewItem } = setup({ themePreference });
+        const checked = findViewItem("Appearance")
+          .submenu.filter((item) => item.checked)
+          .map((item) => item.label);
+        expect(checked).toEqual(["System"]);
+      },
+    );
+
+    it.each([
+      ["System", "system"],
+      ["Light", "light"],
+      ["Dark", "dark"],
+    ])("clicking %s sets the %s preference", (label, preference) => {
+      const { findViewItem, setThemePreference, focusedWindow } = setup();
+      findViewItem("Appearance")
+        .submenu.find((item) => item.label === label)
+        .click();
+      expect(setThemePreference).toHaveBeenCalledTimes(1);
+      expect(setThemePreference).toHaveBeenCalledWith(preference);
+      expect(focusedWindow.webContents.send).not.toHaveBeenCalled();
+    });
+
+    it("gives each radio item a stable id", () => {
+      const { findViewItem } = setup();
+      expect(findViewItem("Appearance").submenu.map((item) => item.id)).toEqual([
+        "appearance-system",
+        "appearance-light",
+        "appearance-dark",
+      ]);
+    });
   });
 });

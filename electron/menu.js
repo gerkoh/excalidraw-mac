@@ -1,7 +1,16 @@
+const { buildOpenRecentMenuItem } = require("./document");
+const { buildAppearanceMenuItem } = require("./theme");
+
 // --- Application Menu ---
 
 // builds the Menu template; electron calls are injected so this stays unit-testable
-const buildMenuTemplate = ({ appName, getFocusedWindow, clearLastOpenedPath }) => {
+const buildMenuTemplate = ({
+  appName,
+  getFocusedWindow,
+  clearLastOpenedPath,
+  themePreference,
+  setThemePreference,
+}) => {
   const sendToFocusedWindow = (channel) => {
     const win = getFocusedWindow();
     if (win) win.webContents.send(channel);
@@ -38,6 +47,8 @@ const buildMenuTemplate = ({ appName, getFocusedWindow, clearLastOpenedPath }) =
           accelerator: "Cmd+O",
           click: () => sendToFocusedWindow("menu-open"),
         },
+        buildOpenRecentMenuItem(),
+        { type: "separator" },
         {
           label: "Save",
           accelerator: "Cmd+S",
@@ -71,6 +82,8 @@ const buildMenuTemplate = ({ appName, getFocusedWindow, clearLastOpenedPath }) =
         { role: "zoomIn" },
         { role: "zoomOut" },
         { role: "resetZoom" },
+        { type: "separator" },
+        buildAppearanceMenuItem({ themePreference, setThemePreference }),
         { type: "separator" },
         { role: "togglefullscreen" },
       ],
