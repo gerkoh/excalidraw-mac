@@ -139,6 +139,8 @@ Electron's sandboxed preload scripts [don't support ESM](https://www.electronjs.
 
 [`electron-store`](https://github.com/sindresorhus/electron-store) v12 is ESM-only and requires Node.js 22 or newer (and Electron 30 or newer). Electron 45 bundles Node.js 24, so `main.js` loads it with `require()` and takes the default export. That stays on the CommonJS loader, which still resolves inside a packaged asar. Dynamic `import()` is not used for this module, because that loader does not resolve packages inside asar archives.
 
+`shared/libraryUrl.mjs` is the one exception to CommonJS: the main process and the renderer both need the same library URL allowlist, so it's plain ESM with no imports. `main.js` loads it with `require()` the same way it loads `electron-store`, and Vite bundles it into the renderer.
+
 ### #2 Why does the main process write files instead of fileHandle.createWritable()?
 
 - `fileHandle.createWritable()` is a browser [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/FileSystemWritableFileStream) — it runs in the renderer, which is sandboxed and shouldn't own filesystem operations
@@ -204,7 +206,7 @@ If no file is open (an untitled drawing), nothing is auto-saved. Use ⌘S to pic
 
 Unit tests use [Vitest](https://vitest.dev/) and sit next to the code they cover as `*.test.js`. `vitest.config.mjs` splits them into two projects:
 
-- **main** (Node): `preload.test.js` and `electron/**/*.test.js`. These load the CommonJS modules with `createRequire`. The preload test swaps a fake `electron` into Node's require cache, because `vi.mock` can't intercept a CommonJS `require`.
+- **main** (Node): `preload.test.js`, `electron/**/*.test.js` and `shared/**/*.test.js`. These load the CommonJS modules with `createRequire`. The preload test swaps a fake `electron` into Node's require cache, because `vi.mock` can't intercept a CommonJS `require`.
 - **renderer** (jsdom): `excalidraw-app/src/**/*.test.{js,jsx}`. Hooks are tested with `@testing-library/react` and a mocked `window.electronAPI`. The real `@excalidraw/excalidraw` is used; `excalidraw-app/src/test/setup.js` stubs the canvas context it touches on import. `App.test.jsx` is the exception: it mocks the `Excalidraw` component to check the props `App` passes.
 
 Tests never launch Electron or touch your real drawings or electron-store. File I/O tests write to a temp directory.

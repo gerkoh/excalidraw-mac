@@ -58,8 +58,5 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Library installs from libraries.excalidraw.com (excalidraw-mac:// URLs).
   // The event carries no data; call takePendingLibraryInstalls() to get the requests.
   takePendingLibraryInstalls: () => ipcRenderer.invoke("take-pending-library-installs"),
-  onLibraryInstallRequested: (callback) => {
-    ipcRenderer.on("library-install-requested", callback);
-    return () => ipcRenderer.removeListener("library-install-requested", callback);
-  },
+  onLibraryInstallRequested: subscribe("library-install-requested"),
 });
