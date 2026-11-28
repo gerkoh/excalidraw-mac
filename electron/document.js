@@ -23,18 +23,16 @@ const applyCurrentFileToWindow = (win, filePath) => {
   }
 };
 
-// IPC "set-current-file": the renderer reports its currentFilePath (null = untitled) whenever it changes
-const createSetCurrentFileHandler = ({ isAllowedPath, getWindowFromWebContents }) => {
-  return (event, filePath) => {
-    if (filePath !== null && !isAllowedPath(filePath)) {
-      console.error("[main] Rejected set-current-file for disallowed path:", filePath);
-      return false;
-    }
-    const win = getWindowFromWebContents(event.sender);
-    if (!win) return false;
-    applyCurrentFileToWindow(win, filePath);
-    return true;
-  };
+// the file path carried by a "set-document-state" report (null = untitled).
+// a disallowed path is rejected and the window is left untouched
+const applyReportedFile = (win, filePath, isAllowedPath) => {
+  if (!win) return false;
+  if (filePath !== null && !isAllowedPath(filePath)) {
+    console.error("[main] Rejected document state for disallowed path:", filePath);
+    return false;
+  }
+  applyCurrentFileToWindow(win, filePath);
+  return true;
 };
 
 // --- "File became current" bookkeeping ---
@@ -69,7 +67,8 @@ const missingFileError = (filePath) => ({
   content: `The file may have been moved, renamed or deleted.\n\n${filePath}`,
 });
 
-// electron calls are injected so every branch is unit-testable
+// electron calls are injected so every branch is unit-testable.
+// confirmReplaceDocument(win) resolves false if the user cancelled the "Save changes?" prompt.
 const createOpenFileHandler = ({
   isAllowedPath,
   isReadable,
@@ -77,11 +76,12 @@ const createOpenFileHandler = ({
   isStoreReady,
   recordCurrentFile,
   getWindow,
+  confirmReplaceDocument,
   isAppReady,
   setPendingFile,
   createWindow,
 }) => {
-  return (filePath) => {
+  return async (filePath) => {
     if (!isAllowedPath(filePath)) return "ignored";
 
     // a recent item can point at a moved/deleted file: tell the user and leave the current drawing alone
@@ -98,16 +98,18 @@ const createOpenFileHandler = ({
       setPendingFile(filePath);
       return "queued";
     }
-    recordCurrentFile(filePath);
 
     const win = getWindow();
     if (win) {
-      // app is running with a window: hand the file to the renderer
+      // app is running with a window: hand the file to the renderer once unsaved changes are dealt with
       if (win.isMinimized()) win.restore();
       win.focus();
+      if (!(await confirmReplaceDocument(win))) return "cancelled";
+      recordCurrentFile(filePath);
       win.webContents.send("open-file", filePath);
       return "sent";
     }
+    recordCurrentFile(filePath);
     setPendingFile(filePath);
     if (isAppReady()) {
       // app is running but all windows are closed (e.g. Cmd+W): reopen, renderer picks up the pending file
@@ -132,7 +134,7 @@ module.exports = {
   UNTITLED,
   formatWindowTitle,
   applyCurrentFileToWindow,
-  createSetCurrentFileHandler,
+  applyReportedFile,
   createCurrentFileRecorder,
   isReadableFile,
   missingFileError,

@@ -9,7 +9,7 @@ const {
   UNTITLED,
   formatWindowTitle,
   applyCurrentFileToWindow,
-  createSetCurrentFileHandler,
+  applyReportedFile,
   createCurrentFileRecorder,
   isReadableFile,
   missingFileError,
@@ -111,25 +111,17 @@ describe("applyCurrentFileToWindow", () => {
   });
 });
 
-describe("createSetCurrentFileHandler", () => {
-  const setup = ({ win = createFakeWindow() } = {}) => {
-    const getWindowFromWebContents = vi.fn(() => win);
-    const handler = createSetCurrentFileHandler({ isAllowedPath, getWindowFromWebContents });
-    const sender = { id: 1 };
-    return { handler, win, getWindowFromWebContents, event: { sender } };
-  };
-
-  it("applies the reported file to the sender's window", () => {
-    const { handler, win, getWindowFromWebContents, event } = setup();
-    expect(handler(event, "/Users/me/diagram.excalidraw")).toBe(true);
-    expect(getWindowFromWebContents).toHaveBeenCalledWith(event.sender);
+describe("applyReportedFile", () => {
+  it("applies the reported file to the window", () => {
+    const win = createFakeWindow();
+    expect(applyReportedFile(win, "/Users/me/diagram.excalidraw", isAllowedPath)).toBe(true);
     expect(win.setTitle).toHaveBeenCalledWith("diagram");
     expect(win.setRepresentedFilename).toHaveBeenCalledWith("/Users/me/diagram.excalidraw");
   });
 
   it("accepts null as untitled", () => {
-    const { handler, win, event } = setup();
-    expect(handler(event, null)).toBe(true);
+    const win = createFakeWindow();
+    expect(applyReportedFile(win, null, isAllowedPath)).toBe(true);
     expect(win.setTitle).toHaveBeenCalledWith("Untitled");
     expect(win.setRepresentedFilename).toHaveBeenCalledWith("");
   });
@@ -140,16 +132,14 @@ describe("createSetCurrentFileHandler", () => {
     ["an empty string", ""],
     ["a number", 7],
   ])("rejects %s without touching the window", (_label, value) => {
-    const { handler, win, getWindowFromWebContents, event } = setup();
-    expect(handler(event, value)).toBe(false);
-    expect(getWindowFromWebContents).not.toHaveBeenCalled();
+    const win = createFakeWindow();
+    expect(applyReportedFile(win, value, isAllowedPath)).toBe(false);
     expect(win.setTitle).not.toHaveBeenCalled();
     expect(console.error).toHaveBeenCalled();
   });
 
-  it("returns false when the sender has no window", () => {
-    const { handler, event } = setup({ win: null });
-    expect(handler(event, "/a.excalidraw")).toBe(false);
+  it("returns false without throwing when there is no window", () => {
+    expect(applyReportedFile(null, "/a.excalidraw", isAllowedPath)).toBe(false);
   });
 });
 
@@ -262,6 +252,7 @@ describe("createOpenFileHandler", () => {
     storeReady = true,
     appReady = true,
     win = createFakeWindow(),
+    mayReplace = true,
   } = {}) => {
     const deps = {
       isAllowedPath,
@@ -270,6 +261,7 @@ describe("createOpenFileHandler", () => {
       isStoreReady: vi.fn(() => storeReady),
       recordCurrentFile: vi.fn(),
       getWindow: vi.fn(() => win),
+      confirmReplaceDocument: vi.fn(() => Promise.resolve(mayReplace)),
       isAppReady: vi.fn(() => appReady),
       setPendingFile: vi.fn(),
       createWindow: vi.fn(),
@@ -277,23 +269,27 @@ describe("createOpenFileHandler", () => {
     return { deps, win, handle: createOpenFileHandler(deps) };
   };
 
-  it.each([null, undefined, "/Users/me/notes.txt", ""])("ignores disallowed path %j", (value) => {
-    const { deps, handle } = setup();
-    expect(handle(value)).toBe("ignored");
-    expect(deps.isReadable).not.toHaveBeenCalled();
-    expect(deps.showError).not.toHaveBeenCalled();
-    expect(deps.recordCurrentFile).not.toHaveBeenCalled();
-    expect(deps.setPendingFile).not.toHaveBeenCalled();
-  });
+  it.each([null, undefined, "/Users/me/notes.txt", ""])(
+    "ignores disallowed path %j",
+    async (value) => {
+      const { deps, handle } = setup();
+      expect(await handle(value)).toBe("ignored");
+      expect(deps.isReadable).not.toHaveBeenCalled();
+      expect(deps.showError).not.toHaveBeenCalled();
+      expect(deps.recordCurrentFile).not.toHaveBeenCalled();
+      expect(deps.setPendingFile).not.toHaveBeenCalled();
+      expect(deps.confirmReplaceDocument).not.toHaveBeenCalled();
+    },
+  );
 
   describe("missing file (e.g. a recent item that was moved or deleted)", () => {
     it.each([
       ["with a window", {}],
       ["with all windows closed", { win: null }],
       ["while the app is launching", { storeReady: false, appReady: false, win: null }],
-    ])("shows a native error %s", (_label, options) => {
+    ])("shows a native error %s", async (_label, options) => {
       const { deps, handle } = setup({ readable: false, ...options });
-      expect(handle(FILE)).toBe("missing");
+      expect(await handle(FILE)).toBe("missing");
       expect(deps.showError).toHaveBeenCalledTimes(1);
       expect(deps.showError).toHaveBeenCalledWith(
         missingFileError(FILE).title,
@@ -301,26 +297,27 @@ describe("createOpenFileHandler", () => {
       );
     });
 
-    it("doesn't clobber the current drawing or the remembered path", () => {
+    it("doesn't clobber the current drawing or the remembered path", async () => {
       const { deps, win, handle } = setup({ readable: false });
-      handle(FILE);
+      await handle(FILE);
       expect(deps.recordCurrentFile).not.toHaveBeenCalled();
       expect(deps.setPendingFile).not.toHaveBeenCalled();
       expect(deps.createWindow).not.toHaveBeenCalled();
       expect(win.webContents.send).not.toHaveBeenCalled();
+      expect(deps.confirmReplaceDocument).not.toHaveBeenCalled();
     });
 
-    it("doesn't open a window when all windows are closed", () => {
+    it("doesn't open a window when all windows are closed", async () => {
       const { deps, handle } = setup({ readable: false, win: null });
-      handle(FILE);
+      await handle(FILE);
       expect(deps.createWindow).not.toHaveBeenCalled();
     });
   });
 
   describe("app running with a window", () => {
-    it("records the file and sends it to the renderer", () => {
+    it("records the file and sends it to the renderer", async () => {
       const { deps, win, handle } = setup();
-      expect(handle(FILE)).toBe("sent");
+      expect(await handle(FILE)).toBe("sent");
       expect(deps.recordCurrentFile).toHaveBeenCalledWith(FILE);
       expect(win.webContents.send).toHaveBeenCalledTimes(1);
       expect(win.webContents.send).toHaveBeenCalledWith("open-file", FILE);
@@ -328,41 +325,69 @@ describe("createOpenFileHandler", () => {
       expect(deps.createWindow).not.toHaveBeenCalled();
     });
 
-    it("records before sending so a renderer that is still loading picks it up as last path", () => {
+    it("asks the window to confirm replacing its drawing before recording or sending", async () => {
       const { deps, win, handle } = setup();
-      handle(FILE);
+      await handle(FILE);
+      expect(deps.confirmReplaceDocument).toHaveBeenCalledTimes(1);
+      expect(deps.confirmReplaceDocument).toHaveBeenCalledWith(win);
+      expect(deps.confirmReplaceDocument.mock.invocationCallOrder[0]).toBeLessThan(
+        deps.recordCurrentFile.mock.invocationCallOrder[0],
+      );
+    });
+
+    it("focuses the window before prompting so the sheet appears on a visible window", async () => {
+      const { deps, win, handle } = setup();
+      await handle(FILE);
+      expect(win.focus.mock.invocationCallOrder[0]).toBeLessThan(
+        deps.confirmReplaceDocument.mock.invocationCallOrder[0],
+      );
+    });
+
+    it("leaves the drawing and the remembered path alone when the user cancels", async () => {
+      const { deps, win, handle } = setup({ mayReplace: false });
+      expect(await handle(FILE)).toBe("cancelled");
+      expect(deps.recordCurrentFile).not.toHaveBeenCalled();
+      expect(win.webContents.send).not.toHaveBeenCalled();
+      expect(deps.setPendingFile).not.toHaveBeenCalled();
+      expect(deps.createWindow).not.toHaveBeenCalled();
+    });
+
+    it("records before sending so a renderer that is still loading picks it up as last path", async () => {
+      const { deps, win, handle } = setup();
+      await handle(FILE);
       expect(deps.recordCurrentFile.mock.invocationCallOrder[0]).toBeLessThan(
         win.webContents.send.mock.invocationCallOrder[0],
       );
     });
 
-    it("focuses the window", () => {
+    it("focuses the window", async () => {
       const { win, handle } = setup();
-      handle(FILE);
+      await handle(FILE);
       expect(win.focus).toHaveBeenCalledTimes(1);
       expect(win.restore).not.toHaveBeenCalled();
     });
 
-    it("restores a minimized window", () => {
+    it("restores a minimized window", async () => {
       const { win, handle } = setup({ win: createFakeWindow({ minimized: true }) });
-      handle(FILE);
+      await handle(FILE);
       expect(win.restore).toHaveBeenCalledTimes(1);
       expect(win.focus).toHaveBeenCalledTimes(1);
     });
   });
 
   describe("app running with all windows closed", () => {
-    it("records the file, queues it as pending and reopens a window", () => {
+    it("records the file, queues it as pending and reopens a window", async () => {
       const { deps, handle } = setup({ win: null });
-      expect(handle(FILE)).toBe("reopened");
+      expect(await handle(FILE)).toBe("reopened");
       expect(deps.recordCurrentFile).toHaveBeenCalledWith(FILE);
       expect(deps.setPendingFile).toHaveBeenCalledWith(FILE);
       expect(deps.createWindow).toHaveBeenCalledTimes(1);
+      expect(deps.confirmReplaceDocument).not.toHaveBeenCalled();
     });
 
-    it("queues the pending file before creating the window that reads it", () => {
+    it("queues the pending file before creating the window that reads it", async () => {
       const { deps, handle } = setup({ win: null });
-      handle(FILE);
+      await handle(FILE);
       expect(deps.setPendingFile.mock.invocationCallOrder[0]).toBeLessThan(
         deps.createWindow.mock.invocationCallOrder[0],
       );
@@ -370,17 +395,17 @@ describe("createOpenFileHandler", () => {
   });
 
   describe("app still launching", () => {
-    it("queues the file without recording when the store isn't ready", () => {
+    it("queues the file without recording when the store isn't ready", async () => {
       const { deps, handle } = setup({ storeReady: false, appReady: false, win: null });
-      expect(handle(FILE)).toBe("queued");
+      expect(await handle(FILE)).toBe("queued");
       expect(deps.setPendingFile).toHaveBeenCalledWith(FILE);
       expect(deps.recordCurrentFile).not.toHaveBeenCalled();
       expect(deps.createWindow).not.toHaveBeenCalled();
     });
 
-    it("queues without creating a window when the store is ready but the app isn't", () => {
+    it("queues without creating a window when the store is ready but the app isn't", async () => {
       const { deps, handle } = setup({ appReady: false, win: null });
-      expect(handle(FILE)).toBe("queued");
+      expect(await handle(FILE)).toBe("queued");
       expect(deps.recordCurrentFile).toHaveBeenCalledWith(FILE);
       expect(deps.setPendingFile).toHaveBeenCalledWith(FILE);
       expect(deps.createWindow).not.toHaveBeenCalled();

@@ -9,6 +9,8 @@ vi.mock("@excalidraw/excalidraw", () => ({
     return null;
   },
   serializeAsJSON: vi.fn(() => "{}"),
+  // scene snapshots hash the elements; the value only has to be stable
+  hashElementsVersion: () => "0",
 }));
 vi.mock("@excalidraw/excalidraw/index.css", () => ({}));
 
@@ -33,7 +35,7 @@ const createElectronAPI = ({ theme = "light", lastPath = null, files = {} } = {}
     onMenuSaveAs: noopSubscribe,
     onOpenFile: noopSubscribe,
     onBeforeClose: noopSubscribe,
-    setCurrentFile: vi.fn(),
+    setDocumentState: vi.fn(),
     getTheme: vi.fn(() => Promise.resolve(theme)),
     setThemePreference: vi.fn(),
     onThemeChanged: vi.fn((callback) => {
@@ -138,20 +140,32 @@ describe("App: window title", () => {
       files: { "/Users/me/diagram.excalidraw": JSON.stringify({ elements: [], appState: {} }) },
     });
     await waitFor(() =>
-      expect(api.setCurrentFile).toHaveBeenCalledWith("/Users/me/diagram.excalidraw"),
+      expect(api.setDocumentState).toHaveBeenCalledWith(
+        expect.objectContaining({ filePath: "/Users/me/diagram.excalidraw" }),
+      ),
     );
-    expect(api.setCurrentFile).toHaveBeenCalledTimes(1);
+    expect(api.setDocumentState).toHaveBeenCalledTimes(1);
   });
 
   it("reports untitled (null) when there is no file, without a prior report", async () => {
     const api = await renderReady();
-    await waitFor(() => expect(api.setCurrentFile).toHaveBeenCalledWith(null));
-    expect(api.setCurrentFile).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(api.setDocumentState).toHaveBeenCalledWith(
+        expect.objectContaining({ filePath: null }),
+      ),
+    );
+    expect(api.setDocumentState).toHaveBeenCalledTimes(1);
   });
 
   it("reports untitled when the last file can't be read", async () => {
     const api = await renderReady({ lastPath: "/gone.excalidraw" });
-    await waitFor(() => expect(api.setCurrentFile).toHaveBeenCalledWith(null));
-    expect(api.setCurrentFile).not.toHaveBeenCalledWith("/gone.excalidraw");
+    await waitFor(() =>
+      expect(api.setDocumentState).toHaveBeenCalledWith(
+        expect.objectContaining({ filePath: null }),
+      ),
+    );
+    expect(api.setDocumentState).not.toHaveBeenCalledWith(
+      expect.objectContaining({ filePath: "/gone.excalidraw" }),
+    );
   });
 });
